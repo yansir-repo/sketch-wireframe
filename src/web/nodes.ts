@@ -13,10 +13,10 @@ import type { Db } from "./db.ts";
 import { query } from "./db.ts";
 import { keyOf, titleFieldOf } from "../shared/derive.ts";
 import { renderForm } from "./fields.ts";
-import { applySel, facetHtml, facetsOf, toQuery, type Sel } from "./facets.ts";
+import { applySel, facetsOf, toQuery, type Sel } from "./facets.ts";
 import { display, esc, isEmpty, recordTitle } from "./fmt.ts";
 import { factFields } from "../shared/facts.ts";
-import { parsePath } from "../shared/scope.ts";
+import { isMultiParam, parsePath } from "../shared/scope.ts";
 import { scalar } from "../shared/scalar.ts";
 import type {
   Atom,
@@ -26,11 +26,12 @@ import type {
   Group,
   Node,
   Page,
+  ParamDecl,
   Row,
   Sketch,
   Source,
 } from "../shared/schema.ts";
-import { strings } from "./strings.ts";
+import { strings } from "../shared/strings.ts";
 
 export type Fidelity = "lines" | "words";
 
@@ -54,7 +55,18 @@ export type RVar =
   | { kind: "photo"; dataUrl: string; gid: string; i: number; placeholder: boolean }
   | { kind: "row"; row: Row }
   /** 占位：generator 没有项、但结构上该有几项时用（画波浪线/叉框/空圆圈）。 */
-  | { kind: "empty" };
+  | { kind: "empty" }
+  /** facets 来源的一项：一个筛选字段和它的各个选项。 */
+  | { kind: "facet"; field: string; label: string; options: OptionVar[] }
+  /** 一个选项（筛选字段的某个值，或状态参数的某个取值）。count = 再选它还剩几个（状态参数没有）。 */
+  | OptionVar;
+export type OptionVar = {
+  kind: "option";
+  value: string;
+  label: string;
+  count?: number;
+  on: boolean;
+};
 
 export type RC = {
   s: Sketch;
@@ -65,6 +77,10 @@ export type RC = {
   /** 环境：变量名 → 值；it = 当前记录的变量名。 */
   vars: ReadonlyMap<string, RVar>;
   it?: string;
+  /** 这个页面能用的状态参数（页面自己声明的 + 会话级的）；筛选的参数不用声明。 */
+  state: Readonly<Record<string, ParamDecl>>;
+  /** 会话级参数在浏览器里存着的值（换页不丢）。地址里有就以地址为准。 */
+  stored?: Readonly<Record<string, ReadonlyArray<string>>>;
   /** 新增表单页：在新增哪个类型（form 要知道）。 */
   createType?: string;
   /** 列表页在列哪个类型（filters 要知道）。 */
@@ -74,6 +90,8 @@ export type RC = {
   /** 当前选中的筛选/初始值（来自地址的 ?query）和当前路径（筛选链接要回到这一页）。 */
   sel: Sel;
   path: string;
+  /** 正在渲染一个 embed 里的树：里面不再展开 embed。 */
+  inEmbed?: boolean;
   /** 递增的种子，给每个手绘元素固定的形状。 */
   seq: { n: number };
   /** 图片查看器的图集：gid → 图片地址。 */
@@ -129,6 +147,14 @@ export const evalBind = (rc: RC, path: string): Val => {
   let rest = segs;
   let v: RVar | undefined;
   const first = segs[0];
+  // ui.xxx：引擎自带的文案（按草图的 locale）——标注，不是作者的文案
+  if (first && "lit" in first && first.lit === "ui" && !rc.vars.has("ui")) {
+    const k = segs[1];
+    const table = strings(rc.s.locale) as unknown as Record<string, unknown>;
+    return k && "lit" in k && typeof table[k.lit] === "string"
+      ? { kind: "text", v: table[k.lit] as string, data: false }
+      : NONE;
+  }
   if (first && "lit" in first && rc.vars.has(first.lit)) {
     v = rc.vars.get(first.lit);
     rest = segs.slice(1);
@@ -164,9 +190,109 @@ export const evalBind = (rc: RC, path: string): Val => {
       return NONE;
     case "row":
       return { kind: "text", v: scalar(v.row[name]), data: true };
+    case "facet":
+      // 筛选字段的名字是标注（字段名）：两档都显示
+      if (name === "label") return { kind: "text", v: v.label, data: false };
+      if (name === "field") return { kind: "text", v: v.field, data: false };
+      return NONE;
+    case "option":
+      if (name === "label") return { kind: "text", v: v.label, data: true };
+      if (name === "value") return { kind: "text", v: v.value, data: true };
+      if (name === "count")
+        return { kind: "text", v: v.count === undefined ? "" : String(v.count), data: true };
+      return NONE;
     default:
       return NONE;
   }
+};
+
+// ---- 状态：参数、条件出现、链接 ----
+
+const isSession = (rc: RC, name: string): boolean => rc.s.session?.[name] !== undefined;
+
+/** 一个参数现在的值：地址里有就用地址的；会话级参数其次用浏览器里存着的；单选参数最后取 default。 */
+const paramNow = (rc: RC, name: string): string[] => {
+  const given = rc.sel[name];
+  if (given && given.length) return given;
+  const kept = rc.stored?.[name];
+  if (kept && kept.length) return [...kept];
+  const d = rc.state[name]?.default;
+  return d !== undefined ? [d] : [];
+};
+
+const paramMulti = (rc: RC, name: string): boolean =>
+  isMultiParam({ vars: new Map(), it: undefined, state: rc.state }, name);
+
+export const shown = (
+  rc: RC,
+  w: { param: string | ReadonlyArray<string>; is?: string } | undefined,
+): boolean => {
+  if (!w) return true;
+  const names = typeof w.param === "string" ? [w.param] : [...w.param];
+  return names.some((p) => {
+    const now = paramNow(rc, p);
+    return w.is === undefined ? now.length > 0 : now.includes(w.is);
+  });
+};
+
+/** set 的键/值里的 {f.field} 和 bind，按环境求成字符串。 */
+const setEntries = (
+  rc: RC,
+  set: Readonly<Record<string, string | { bind: string }>>,
+): Array<[string, string]> =>
+  Object.entries(set).map(([k, v]) => {
+    const key = k.startsWith("{") && k.endsWith("}") ? rawText(evalBind(rc, k.slice(1, -1))) : k;
+    return [key, typeof v === "string" ? v : rawText(evalBind(rc, v.bind))];
+  });
+
+/** 改参数后的地址：单选是“设成”（等于 default 就省掉），多选是“切换”，空串清掉；其余参数原样带着。 */
+const hrefSet = (rc: RC, set: Readonly<Record<string, string | { bind: string }>>): string => {
+  const next: Sel = { ...rc.sel };
+  for (const [k, v] of setEntries(rc, set)) {
+    // 会话级参数永远写明在地址里：省掉 default 的话，浏览器里存着的旧值会盖回来
+    if (v === "") {
+      if (isSession(rc, k) && rc.state[k]?.default !== undefined) next[k] = [rc.state[k]!.default!];
+      else delete next[k];
+    } else if (paramMulti(rc, k)) {
+      const cur = next[k] ?? [];
+      next[k] = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v];
+      if (next[k]!.length === 0) delete next[k];
+    } else if (rc.state[k]?.default === v && !isSession(rc, k)) delete next[k];
+    else next[k] = [v];
+  }
+  const qs = toQuery(next, Object.keys(next));
+  return `#${rc.path}${qs ? "?" + qs : ""}`;
+};
+
+/** 这个 set 现在是不是“选中”的（标签页的当前标签、被勾上的选项）。 */
+const setActive = (rc: RC, set: Readonly<Record<string, string | { bind: string }>>): boolean => {
+  const es = setEntries(rc, set).filter(([, v]) => v !== "");
+  return es.length > 0 && es.every(([k, v]) => paramNow(rc, k).includes(v));
+};
+
+/** 选项“没得选”：选它会一个都不剩，而且它还没被选上。 */
+const setDim = (rc: RC, set: Readonly<Record<string, string | { bind: string }>>): boolean =>
+  Object.values(set).some((v) => {
+    if (typeof v === "string") return false;
+    const head = parsePath(v.bind)[0];
+    const o = head && "lit" in head ? rc.vars.get(head.lit) : undefined;
+    return o?.kind === "option" && o.count === 0 && !o.on;
+  });
+
+/** 去别的页：?query 只带 with 里写的（目标页的表单拿它们当初始值）。 */
+const hrefTo = (
+  rc: RC,
+  to: string,
+  withArgs: Readonly<Record<string, string | { bind: string }>> | undefined,
+): string => {
+  const args = Object.entries(withArgs ?? {})
+    .map(([k, v]) => {
+      const t = typeof v === "string" ? v : rawText(evalBind(rc, v.bind));
+      return t === "" ? "" : `${encodeURIComponent(k)}=${encodeURIComponent(t)}`;
+    })
+    .filter(Boolean)
+    .join("&");
+  return `#${to}${args ? "?" + args : ""}`;
 };
 
 /** 一个值的“原始”文字（链接带过去的初始值用它：存的是 id/编码，不是显示名）。 */
@@ -181,25 +307,85 @@ const fillText = (rc: RC, fill: Fill): { kind: "none" } | { kind: "val"; val: Va
   if (fill === undefined) return { kind: "none" };
   if (typeof fill === "string") return { kind: "val", val: { kind: "text", v: fill, data: true } };
   if ("bind" in fill) return { kind: "val", val: evalBind(rc, fill.bind) };
-  return {
-    kind: "val",
-    val: { kind: "text", v: String(sourceRows(rc, fill.count).length), data: true },
-  };
+  const v = evalFold(rc, fill.fold);
+  return v === null ? { kind: "none" } : { kind: "val", val: { kind: "text", v, data: true } };
+};
+
+/** 折叠：count 数项数（空集是 0）；sum/min/max/avg 对数字字段，没有数据 = null（画波浪线，不编）。 */
+const evalFold = (rc: RC, f: { op: string; of: Source; field?: string }): string | null => {
+  if ("distinct" in f.of)
+    return f.op === "count" ? String(distinctOf(rc, f.of.distinct).length) : null;
+  const rows = sourceRows(rc, f.of);
+  if (f.op === "count") return String(rows.length);
+  const field = f.field;
+  if (!field) return null;
+  const nums = rows
+    .map((r) => {
+      const row = (
+        r && typeof r === "object" && "row" in (r as object) ? (r as { row: Row }).row : r
+      ) as Row;
+      const raw = row[field];
+      return raw === "" || raw == null ? NaN : Number(raw);
+    })
+    .filter((n) => Number.isFinite(n));
+  if (nums.length === 0) return null;
+  const total = nums.reduce((a, b) => a + b, 0);
+  const out =
+    f.op === "sum"
+      ? total
+      : f.op === "min"
+        ? Math.min(...nums)
+        : f.op === "max"
+          ? Math.max(...nums)
+          : total / nums.length;
+  return String(Math.round(out * 100) / 100);
+};
+
+/** distinct：一个字段出现过的各个值（多值字段逐个展开），每项带“有这个值的记录数”。 */
+const distinctOf = (rc: RC, d: { type: string; field: string }): OptionVar[] => {
+  const counts = new Map<string, number>();
+  for (const r of rc.db.list(d.type)) {
+    const raw = r[d.field];
+    for (const v of (Array.isArray(raw) ? raw : isEmpty(raw) ? [] : [raw]).map(scalar))
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  return [...counts].map(([value, count]) => ({
+    kind: "option" as const,
+    value,
+    label: display(rc.s, rc.db, d.type, { [d.field]: value }, d.field) || value,
+    count,
+    on: false,
+  }));
 };
 
 // ---- 来源 ----
+
+/** 地址里的参数里，哪些是对这个类型的字段筛选（状态参数不是）。 */
+const filterKeys = (rc: RC, type: string): string[] =>
+  Object.keys(rc.sel).filter((k) => !rc.state[k] && rc.s.model[type]?.fields[k] !== undefined);
+
+/** where 里的 {x.value}：条件的值来自环境里的一个变量（分组统计里“这一组的值”）。 */
+const resolveWhere = (rc: RC, where: Readonly<Record<string, string>> | undefined) =>
+  where === undefined
+    ? undefined
+    : Object.fromEntries(
+        Object.entries(where).map(([k, v]) => [
+          k,
+          v.startsWith("{") && v.endsWith("}") ? rawText(evalBind(rc, v.slice(1, -1))) : v,
+        ]),
+      );
 
 const sourceRows = (rc: RC, src: Source): unknown[] => {
   if ("records" in src) {
     let rows = query(
       rc.db,
       src.records,
-      src.where,
+      resolveWhere(rc, src.where),
       { params: rc.params, record: pageRecord(rc) },
       (t) => keyOf(rc.s, t),
       !!src.notSelf,
     );
-    if (src.records === rc.listType) rows = applySel(rows, rc.sel, Object.keys(rc.sel));
+    if (src.records === rc.listType) rows = applySel(rows, rc.sel, filterKeys(rc, src.records));
     return rows;
   }
   if ("items" in src) return itemsOf(rc, src.items);
@@ -379,17 +565,14 @@ const actionAtom = (n: Extract<Atom, { slot: "action" }>, rc: RC): string => {
     rc.fid === "words" && text !== ""
       ? `<span data-copy>${esc(text)}</span>`
       : `<span class="sq in" data-rough="sq" data-seed="${seed(rc)}" data-lines="100" data-t="3" style="width:64px;height:14px"></span>`;
-  const cls = `btn${n.ghost ? " ghost" : ""}`;
+  // set：改当前页的状态参数（标签头、手风琴标题）；选中的那个实心
+  const on = n.set && setActive(rc, n.set);
+  const cls = `btn${n.ghost && !on ? " ghost" : ""}${on ? " on" : ""}`;
+  if (n.set)
+    return `<a class="${cls}" data-rough="btn" data-seed="${seed(rc)}" href="${esc(hrefSet(rc, n.set))}">${label}</a>`;
   if (!n.to) return `<span class="${cls}" data-rough="btn" data-seed="${seed(rc)}">${label}</span>`;
   // with：把环境的一部分带去目标页（写进地址的 ?query，目标页的表单拿它当初始值）
-  const args = Object.entries(n.with ?? {})
-    .map(([k, v]) => {
-      const t = typeof v === "string" ? v : rawText(evalBind(rc, v.bind));
-      return t === "" ? "" : `${encodeURIComponent(k)}=${encodeURIComponent(t)}`;
-    })
-    .filter(Boolean)
-    .join("&");
-  return `<a class="${cls}" data-rough="btn" data-seed="${seed(rc)}" href="#${esc(n.to)}${args ? "?" + esc(args) : ""}">${label}</a>`;
+  return `<a class="${cls}" data-rough="btn" data-seed="${seed(rc)}" href="${esc(hrefTo(rc, n.to, n.with))}">${label}</a>`;
 };
 
 const atom = (n: Atom, rc: RC): string => {
@@ -416,22 +599,17 @@ const atom = (n: Atom, rc: RC): string => {
         .join("");
       return `<nav class="nav"><button type="button" class="btn small nav-toggle" data-rough="btn" data-seed="${seed(rc)}" data-act="nav-toggle">☰ ${esc(strings(rc.s.locale).menu)}</button><div class="nav-links">${links}</div></nav>`;
     }
-    case "filters": {
-      const t = rc.listType ?? pageType(rc);
-      if (!t) return "";
-      const base = query(rc.db, t, rc.listWhere, { params: rc.params }, (x) => keyOf(rc.s, x));
-      const facets = facetsOf(rc.s, rc.db, t, n.fields, base, rc.sel);
-      const href = (next: Sel) => {
-        const qs = toQuery(next, n.fields);
-        return `#${rc.path}${qs ? "?" + qs : ""}`;
-      };
-      return facetHtml(facets, rc.sel, {
-        variant: "side",
-        words: rc.fid === "words",
-        clear: strings(rc.s.locale).clearFilters,
-        seed: () => seed(rc),
-        href,
-      });
+    case "embed": {
+      // 把字段里存的树渲染出来；树里不能再有 embed / form / nav / brand（校验已经挡了，这里再保一道：一定终止）
+      if (rc.inEmbed) return "";
+      const r = fillText(rc, n.fill);
+      const val = r.kind === "val" ? r.val : NONE;
+      const raw = val.kind === "field" ? val.row[val.field] : undefined;
+      const kids = Array.isArray(raw) ? (raw as Node[]) : [];
+      const inner = kids
+        .map((k) => (k && typeof k === "object" ? node(k, { ...rc, inEmbed: true }) : ""))
+        .join("");
+      return `<div class="embed">${inner}</div>`;
     }
     case "form":
       return rc.createType ? renderForm(rc.s, rc.db, rc.createType, null, "public", rc.sel) : "";
@@ -440,7 +618,7 @@ const atom = (n: Atom, rc: RC): string => {
 
 // ---- 排列 ----
 
-type Arrange = Pick<Group, "dir" | "name" | "tone" | "seq" | "rule" | "w">;
+type Arrange = Pick<Group, "dir" | "name" | "tone" | "seq" | "rule" | "w" | "link">;
 
 const arrangeHtml = (
   a: Arrange,
@@ -472,9 +650,18 @@ const arrangeHtml = (
     })
     .join("");
   const frame = a.tone === "card" ? ` data-rough="frame" data-seed="${seed(rc)}"` : "";
+  // 可选项带一个手绘的勾选框；选中与否由参数推出
+  const cb =
+    a.tone === "opt" ? `<span class="cb" data-rough="frame" data-seed="${seed(rc)}"></span>` : "";
+  if (a.link) {
+    const set = a.link.set;
+    const href = set ? hrefSet(rc, set) : a.link.to ? hrefTo(rc, a.link.to, a.link.with) : "#";
+    const state = `${set && setActive(rc, set) ? " on" : ""}${set && setDim(rc, set) ? " dim" : ""}`;
+    return `<a class="${cls}${state}" href="${esc(href)}">${cb}${body}</a>`;
+  }
   return a.name
-    ? `<section class="${cls}" data-section="${esc(a.name)}"${frame}><span class="block-tag">${esc(a.name)}</span>${body}</section>`
-    : `<div class="${cls}"${frame}>${body}</div>`;
+    ? `<section class="${cls}" data-section="${esc(a.name)}"${frame}><span class="block-tag">${esc(a.name)}</span>${cb}${body}</section>`
+    : `<div class="${cls}"${frame}>${cb}${body}</div>`;
 };
 
 const eachNode = (n: Each, rc: RC): string => {
@@ -490,7 +677,7 @@ const eachNode = (n: Each, rc: RC): string => {
     const all = sourceRows(rc, src) as Row[];
     const shown = all.slice(0, src.limit ?? 6);
     if (!shown.length) {
-      const filtered = Object.values(rc.sel).some((v) => v.length);
+      const filtered = filterKeys(rc, src.records).some((k) => rc.sel[k]?.length);
       return `<div class="coll"><div class="empty">${esc(filtered ? L.emptyFiltered(def.label) : L.empty(def.label))}</div></div>`;
     }
     kids = shown.map((r) => {
@@ -519,6 +706,40 @@ const eachNode = (n: Each, rc: RC): string => {
   } else if ("fields" in src) {
     if (!n.item) return "";
     kids = fieldEntries(rc, src).map((e) => ({ html: node(n.item!, withVars(rc, as, e)) }));
+  } else if ("facets" in src) {
+    // 筛选面：每个字段一项（选项不足两个的字段不出现），每项带自己的各个选项
+    const t = rc.listType ?? pageType(rc);
+    if (!t || !n.item) return "";
+    const base = query(rc.db, t, rc.listWhere, { params: rc.params }, (x) => keyOf(rc.s, x));
+    const found = facetsOf(rc.s, rc.db, t, src.facets, base, rc.sel, L);
+    kids = found.map((f) => ({
+      html: node(
+        n.item!,
+        withVars(rc, as, {
+          kind: "facet",
+          field: f.field,
+          label: f.label,
+          options: f.options.map((o) => ({ kind: "option", ...o })),
+        }),
+      ),
+    }));
+  } else if ("options" in src) {
+    const f = rc.vars.get(src.options);
+    if (f?.kind !== "facet" || !n.item) return "";
+    kids = f.options.map((o) => ({ html: node(n.item!, withVars(rc, as, o)) }));
+  } else if ("distinct" in src) {
+    if (!n.item) return "";
+    kids = distinctOf(rc, src.distinct).map((o) => ({ html: node(n.item!, withVars(rc, as, o)) }));
+  } else if ("param" in src) {
+    const decl = rc.state[src.param];
+    if (!decl || !n.item) return "";
+    const now = paramNow(rc, src.param);
+    kids = decl.values.map((v) => ({
+      html: node(
+        n.item!,
+        withVars(rc, as, { kind: "option", value: v, label: v, on: now.includes(v) }),
+      ),
+    }));
   } else {
     // items：term/ref 的各条记录、图片、列表的各行。没有项时摆几个占位，让结构读得出来
     const rows = itemsOf(rc, src.items);
@@ -580,6 +801,7 @@ const defaultCard = (s: Sketch, type: string): Node => ({
 });
 
 export const node = (n: Node, rc: RC): string => {
+  if (!shown(rc, n.when)) return "";
   if ("group" in n)
     return arrangeHtml(
       n,

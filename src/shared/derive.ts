@@ -3,7 +3,8 @@
  * 作者只写偏离默认的部分（首页这类无法推出的单例页，以及想换排布的模板）。
  * 纯函数、不碰 DOM：浏览器里的引擎和 Node 里的 check/verify 用同一份推导。
  */
-import { bind, collection, facts, badges, form, gallery, section, text } from "./dsl.ts";
+import { badges, bind, collection, embed, facts, form, gallery, section, text } from "./dsl.ts";
+import { factFields } from "./facts.ts";
 import type { Node, Page, Sketch } from "./schema.ts";
 
 export const keyOf = (s: Sketch, type: string) => s.model[type]!.key;
@@ -22,10 +23,20 @@ const defaultDetail = (s: Sketch, type: string): Node[] => {
   const body: Node[] = [];
   const media = Object.entries(def.fields).find(([, fd]) => fd.kind === "media");
   if (media) body.push(section("图库", gallery(media[0])));
-  body.push(section("基本信息", text(1, bind(titleFieldOf(s, type))), facts()));
+  // 没有能列的字段（比如只有标题和一个正文树）就只放标题，不放一个空的字段表
+  body.push(
+    section(
+      "基本信息",
+      text(1, bind(titleFieldOf(s, type))),
+      ...(factFields(s, type).length ? [facts()] : []),
+    ),
+  );
   for (const [name, fd] of Object.entries(def.fields)) {
     if (fd.kind === "term" && fd.multiple && fd.detail === false)
       body.push(section(fd.label, badges(name)));
+    // 内容是一棵树的字段（文章正文）：详情页自己渲染它
+    if (fd.kind === "blocks" && fd.internal !== true)
+      body.push(section(fd.label, embed(bind(name))));
   }
   return body;
 };

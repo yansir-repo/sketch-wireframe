@@ -4,6 +4,7 @@
  * 节点树里每一处都带着它那里的环境（scope.ts）：模板里的变量是什么、bind 路径指向哪个字段，都在这里被检查。
  */
 import { matchRoute, pagesOf } from "./derive.ts";
+import { parseNodes } from "./parse.ts";
 import { qualityWarnings } from "./quality.ts";
 import {
   FIELD_KINDS,
@@ -26,6 +27,8 @@ const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const KINDS: ReadonlyArray<string> = FIELD_KINDS;
 const SLOTS: ReadonlyArray<string> = SLOT_KINDS;
 const MAX_GROUP_DEPTH = 5;
+const FACET_KINDS = ["term", "ref", "choice", "bool"];
+const PARAM_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /** 页面本身的上下文：路由参数、列表页在列哪个类型、是不是新增表单页。 */
 type PageCtx = { params: string[]; listType?: string; create?: string };
@@ -73,6 +76,11 @@ export const validate = (s: Sketch): Report => {
             err(at, `where 的 ${v} 指向的字段不在类型 ${page.type} 里`);
         } else if (v.startsWith(":") && !ctx.params.includes(v.slice(1)))
           err(at, `where 的 ${v} 不是本路由的参数`);
+        else if (v.startsWith("{") && v.endsWith("}")) {
+          // {x.value}：条件的值来自环境里的一个变量（分组统计里“这一组的值”）
+          const r = resolveStatic(s, env, v.slice(1, -1));
+          if (!r.ok) err(at, `where 的 ${v}：${r.error}`);
+        }
       }
       const page = env.vars.get("page");
       if (src.notSelf && !(page?.kind === "record" && page.type === src.records))
@@ -97,19 +105,123 @@ export const validate = (s: Sketch): Report => {
         err(at, "fields 没有一个能显示的字段");
     }
     if ("items" in src) checkBind(src.items, env, at);
+    if ("facets" in src) {
+      const t = b.var.kind === "facet" ? b.var.type : undefined;
+      if (!src.facets.length) err(at, "facets 至少要一个字段");
+      for (const name of src.facets) {
+        const fd = t ? fieldOf(t, name) : undefined;
+        if (t && !fd) err(at, `facets 的字段 ${name} 不在类型 ${t} 里`);
+        else if (fd && !FACET_KINDS.includes(fd.kind))
+          err(at, `facets 只能筛 term/ref/choice/bool 字段，${name} 是 ${fd.kind}`);
+        else if (fd?.internal) err(at, `facets 里的字段 ${name} 是 internal，不能给客户用`);
+      }
+    }
   };
 
   const checkFill = (fill: Fill, env: Env, ctx: PageCtx, at: string) => {
     if (fill === undefined || typeof fill === "string") return;
     if ("bind" in fill) checkBind(fill.bind, env, at);
     else {
-      if ("fields" in fill.count) err(at, "count 只能数 records 或 items");
-      else checkSource(fill.count, env, ctx, at);
+      const { op, of, field } = fill.fold;
+      if ("fields" in of || "facets" in of || "options" in of || "param" in of)
+        err(at, "fold 只能折叠 records / items / distinct");
+      else checkSource(of, env, ctx, at);
+      if (op === "count") {
+        if (field !== undefined) err(at, "count 不需要 field");
+      } else if (field === undefined) err(at, `${op} 需要 field（一个数字字段）`);
+      else if ("distinct" in of) err(at, `${op} 不能对 distinct 折叠（它只有值和个数）`);
+      else if ("records" in of) {
+        const fd = fieldOf(of.records, field);
+        if (!fd) err(at, `${op} 的字段 ${field} 不在类型 ${of.records} 里`);
+        else if (fd.kind !== "number") err(at, `${op} 要对数字字段折叠，${field} 是 ${fd.kind}`);
+        else if (fd.internal) err(at, `${op} 的字段 ${field} 是 internal`);
+      }
+    }
+  };
+
+  /** 一个状态参数在这里认不认识：页面声明过的，或者是这一页筛选的字段（筛选的参数就是字段名，不用声明）。 */
+  const paramKnown = (name: string, env: Env): boolean => {
+    if (env.state[name]) return true;
+    const page = env.vars.get("page");
+    const t = env.listType ?? (page?.kind === "record" ? page.type : undefined);
+    const fd = t ? fieldOf(t, name) : undefined;
+    return !!fd && FACET_KINDS.includes(fd.kind) && !fd.internal;
+  };
+
+  const checkWhen = (w: NonNullable<Node["when"]>, env: Env, at: string) => {
+    const names = typeof w.param === "string" ? [w.param] : [...w.param];
+    for (const p of names) {
+      if (!paramKnown(p, env)) err(at, `when 的参数 ${p} 没有在这个页面的 state 里声明`);
+      else if (w.is !== undefined && env.state[p] && !env.state[p]!.values.includes(w.is))
+        err(at, `when 的 ${p}=${w.is}：${p} 的取值只有 ${env.state[p]!.values.join("、")}`);
+    }
+  };
+
+  /** 改状态参数：键是已知参数（可以是 {f.field} 这种来自数据的），值是它的取值之一（或空串 = 清掉）。 */
+  const checkSet = (
+    set: Readonly<Record<string, string | { bind: string }>>,
+    env: Env,
+    at: string,
+  ) => {
+    for (const [k, v] of Object.entries(set)) {
+      const dynamic = k.startsWith("{") && k.endsWith("}");
+      if (dynamic) {
+        const r = resolveStatic(s, env, k.slice(1, -1));
+        if (!r.ok) err(at, r.error);
+      } else if (!paramKnown(k, env)) err(at, `set 的参数 ${k} 没有在这个页面的 state 里声明`);
+      else if (
+        typeof v === "string" &&
+        v !== "" &&
+        env.state[k] &&
+        !env.state[k]!.values.includes(v)
+      )
+        err(at, `set 的 ${k}=${v}：${k} 的取值只有 ${env.state[k]!.values.join("、")}`);
+      if (typeof v !== "string") checkBind(v.bind, env, at);
+    }
+  };
+
+  const checkLink = (
+    link: {
+      to?: string;
+      with?: Readonly<Record<string, string | { bind: string }>>;
+      set?: Readonly<Record<string, string | { bind: string }>>;
+    },
+    env: Env,
+    at: string,
+  ) => {
+    if (link.set && link.to) err(at, "link 的 set（改当前页状态）和 to（去别的页）只能写一个");
+    if (link.set) checkSet(link.set, env, at);
+    if (link.to !== undefined) checkTo(link.to, link.with, env, at);
+    else if (link.with) err(at, "with 要和 to 一起写");
+  };
+
+  /** 去别的页：路由要存在；带的 with 只能带给“新增表单页”、写进它有的字段。 */
+  const checkTo = (
+    to: string,
+    withArgs: Readonly<Record<string, string | { bind: string }>> | undefined,
+    env: Env,
+    at: string,
+  ) => {
+    if (!to.startsWith("/")) return err(at, `to 要以 / 开头：${to}`);
+    if (!to.startsWith("/_model") && !matchRoute(patterns, to))
+      return err(at, `to 指向的路由 ${to} 没有对应页面`);
+    for (const [k, v] of Object.entries(withArgs ?? {})) {
+      const target = matchRoute(patterns, to);
+      const c = target ? pages[target.pattern]?.ctx : null;
+      if (!c || !c.create) err(at, `with 只能带给“新增表单页”：${to} 不是`);
+      else {
+        const fd = fieldOf(c.type, k);
+        if (!fd) err(at, `with 的键 ${k} 不是类型 ${c.type} 的字段`);
+        else if (fd.internal) err(at, `with 的键 ${k} 是 internal，公开表单里没有它`);
+      }
+      if (typeof v !== "string") checkBind(v.bind, env, at);
     }
   };
 
   const check = (n: Node, env: Env, ctx: PageCtx, at: string, depth: number): void => {
     if (n.w !== undefined && !(Number.isFinite(n.w) && n.w > 0)) err(at, "span 的份数要是正数");
+    if (n.when) checkWhen(n.when, env, at);
+    if ("group" in n || "each" in n) if (n.link) checkLink(n.link, env, at);
 
     if ("group" in n || "each" in n) {
       if (n.tone && !TONES.includes(n.tone)) err(at, `不认识的 tone ${String(n.tone)}`);
@@ -121,7 +233,11 @@ export const validate = (s: Sketch): Report => {
     }
     if ("group" in n) {
       if (!n.group.length) err(at, "空的组");
-      n.group.forEach((c, i) => check(c, env, ctx, `${at}.group[${i}]`, depth + 1));
+      // 嵌套层数只数“纯排版”的组：有 tone / link / rule 的组、each 都带着意思（筛选面、字段表的一行……），不是版式
+      const layout = !n.tone && !n.link && !n.rule && !n.seq;
+      n.group.forEach((c, i) =>
+        check(c, env, ctx, `${at}.group[${i}]`, layout ? depth + 1 : depth),
+      );
       return;
     }
     if ("each" in n) {
@@ -134,7 +250,7 @@ export const validate = (s: Sketch): Report => {
         return err(at, `变量 ${as} 已被外层占用：嵌套的 each 要用 as 起不同的名字`);
       if (!n.item && !("records" in n.each))
         return err(at, "fields / items 的 each 必须写 item（怎么画每一项）");
-      if (b.ok && n.item) check(n.item, withVar(env, as, b.var), ctx, `${at}.item`, depth + 1);
+      if (b.ok && n.item) check(n.item, withVar(env, as, b.var), ctx, `${at}.item`, depth);
       return;
     }
     if (!SLOTS.includes(n.slot)) {
@@ -155,50 +271,52 @@ export const validate = (s: Sketch): Report => {
         break;
       case "action": {
         checkFill(n.fill, env, ctx, at);
-        const to = n.to;
-        if (to !== undefined && !to.startsWith("/")) err(at, `to 要以 / 开头：${to}`);
-        else if (to && !to.startsWith("/_model") && !matchRoute(patterns, to))
-          err(at, `to 指向的路由 ${to} 没有对应页面`);
-        for (const [k, v] of Object.entries(n.with ?? {})) {
-          const target = to ? matchRoute(patterns, to) : null;
-          const c = target ? pages[target.pattern]?.ctx : null;
-          if (!c || !c.create) err(at, `with 只能带给“新增表单页”：${to ?? "（没有 to）"} 不是`);
-          else {
-            const fd = fieldOf(c.type, k);
-            if (!fd) err(at, `with 的键 ${k} 不是类型 ${c.type} 的字段`);
-            else if (fd.internal) err(at, `with 的键 ${k} 是 internal，公开表单里没有它`);
-          }
-          if (typeof v !== "string") checkBind(v.bind, env, at);
+        if (n.set) {
+          if (n.to) err(at, "action 的 set（改当前页状态）和 to（去别的页）只能写一个");
+          checkSet(n.set, env, at);
         }
+        if (n.to !== undefined) checkTo(n.to, n.with, env, at);
+        else if (n.with) err(at, "with 要和 to 一起写");
         break;
       }
       case "nav":
         for (const p of n.paths) if (!pages[p]) err(at, `nav 里的路由 ${p} 不是已有页面的路由模式`);
         break;
-      case "filters": {
-        const rt =
-          ctx.listType ??
-          (env.vars.get("page")?.kind === "record"
-            ? (env.vars.get("page") as { type: string }).type
-            : undefined);
-        if (!rt) {
-          err(at, "filters 要放在列表页（ctx.many）或详情页里，才知道在哪个类型上筛选");
-          break;
-        }
-        if (!n.fields.length) err(at, "filters 至少要一个字段");
-        for (const name of n.fields) {
-          const fd = fieldOf(rt, name);
-          if (!fd) err(at, `filters 的字段 ${name} 不在类型 ${rt} 里`);
-          else if (!["term", "ref", "choice", "bool"].includes(fd.kind))
-            err(at, `filters 只能筛 term/ref/choice/bool 字段，${name} 是 ${fd.kind}`);
-          else if (fd.internal) err(at, `filters 里的字段 ${name} 是 internal，不能给客户用`);
-        }
-        break;
-      }
       case "form":
         if (!ctx.create) err(at, "form 只能在“新增某类型”的页面里用");
         break;
+      case "embed": {
+        if (!n.fill || typeof n.fill !== "object" || !("bind" in n.fill)) {
+          err(at, 'embed 要绑一个 blocks 字段：embed(bind("body"))');
+          break;
+        }
+        const r = resolveStatic(s, env, n.fill.bind);
+        if (!r.ok) err(at, r.error);
+        else if (r.target.kind !== "field" || r.target.fd.kind !== "blocks")
+          err(at, `embed 要绑 blocks 字段，“${n.fill.bind}”不是`);
+        else if (r.target.fd.internal)
+          err(at, `字段 "${r.target.field}" 是 internal，不能出现在客户页面上`);
+        break;
+      }
     }
+  };
+
+  /** 一个 blocks 字段里存的树：合法的节点；只能是内容（不能再有 embed / form / nav / brand，保证一定终止）；绑定相对那条记录。 */
+  const checkBlocks = (value: unknown, type: string, at: string) => {
+    const parsed = parseNodes(value);
+    if (!parsed.ok) return err(at, `blocks 的值不是合法的节点树：${parsed.error}`);
+    const scope = withVar(pageScope(type), "it", { kind: "record", type });
+    const shell = new Set(["embed", "form", "nav", "brand"]);
+    const walk = (n: Node, where: string) => {
+      if ("group" in n) n.group.forEach((c, i) => walk(c, `${where}.group[${i}]`));
+      else if ("each" in n) {
+        if (n.item) walk(n.item, `${where}.item`);
+      } else if (shell.has(n.slot)) err(where, `blocks 里不能放 ${n.slot}：它是页面的壳，不是内容`);
+    };
+    parsed.nodes.forEach((n, i) => {
+      walk(n, `${at}[${i}]`);
+      check(n, scope, { params: [] }, `${at}[${i}]`, 1);
+    });
   };
 
   // ---- 模型（要在 check 定义之后跑：卡片模板里有节点）----
@@ -249,6 +367,11 @@ export const validate = (s: Sketch): Report => {
             warn(rat, `字段 ${name} 没在 fields 里声明`);
             continue;
           }
+          if (
+            fd.kind === "blocks" &&
+            !(v === undefined || v === "" || (Array.isArray(v) && v.length === 0))
+          )
+            checkBlocks(v, t, `${rat}.${name}`);
           if (isLinkKind(fd.kind) && fd.to && s.model[fd.to]) {
             const target = s.model[fd.to]!;
             const ids = new Set(target.seed.map((x) => String(x[target.key])));
@@ -264,7 +387,7 @@ export const validate = (s: Sketch): Report => {
       if (def.card)
         check(
           def.card,
-          withVar({ vars: new Map(), it: undefined }, "it", { kind: "record", type: t }),
+          withVar(pageScope(undefined, { state: s.session }), "it", { kind: "record", type: t }),
           { params: [] },
           `${at}.card`,
           1,
@@ -274,13 +397,37 @@ export const validate = (s: Sketch): Report => {
 
   checkModel();
 
+  for (const [pname, decl] of Object.entries(s.session ?? {})) {
+    if (!PARAM_RE.test(pname)) err("session", `参数名只能用字母数字下划线横线：${pname}`);
+    if (!decl.values.length) err(`session.${pname}`, "取值不能为空");
+    if (decl.default !== undefined && !decl.values.includes(decl.default))
+      err(`session.${pname}`, `default ${decl.default} 不在 values 里`);
+    if (decl.multi && decl.default !== undefined) err(`session.${pname}`, "多选参数没有 default");
+    for (const [route, page] of Object.entries(pages))
+      if (page.state?.[pname]) err(`pages["${route}"].state.${pname}`, `和会话参数 ${pname} 重名`);
+  }
+
   for (const [pattern, page] of Object.entries(pages)) {
     const at = `pages["${pattern}"]`;
     if (!pattern.startsWith("/")) err(at, "路由要以 / 开头");
     const params = [...pattern.matchAll(/:([A-Za-z]+)/g)].map((m) => m[1]!);
     const c = page.ctx ?? null;
     let ctx: PageCtx = { params };
-    let env = pageScope(undefined);
+    let env = pageScope(undefined, { state: { ...s.session, ...page.state } });
+    for (const [pname, decl] of Object.entries(page.state ?? {})) {
+      if (!PARAM_RE.test(pname)) err(`${at}.state`, `参数名只能用字母数字下划线横线：${pname}`);
+      if (!decl.values.length) err(`${at}.state.${pname}`, "取值不能为空");
+      if (decl.default !== undefined && !decl.values.includes(decl.default))
+        err(`${at}.state.${pname}`, `default ${decl.default} 不在 values 里`);
+      if (decl.multi && decl.default !== undefined)
+        err(`${at}.state.${pname}`, "多选参数没有 default");
+      const t = page.ctx?.type;
+      if (t && s.model[t]?.fields[pname])
+        err(
+          `${at}.state.${pname}`,
+          `参数名和类型 ${t} 的字段重名：筛选的参数就是字段名，换一个名字`,
+        );
+    }
     if (c) {
       if (!s.model[c.type]) {
         err(`${at}.ctx`, `类型 ${c.type} 不存在`);
@@ -291,11 +438,13 @@ export const validate = (s: Sketch): Report => {
         if (v.startsWith(":") && !params.includes(v.slice(1)))
           err(`${at}.ctx`, `where 的 ${v} 不是本路由的参数`);
       }
-      if (c.many) ctx = { params, listType: c.type };
-      else if (c.create) ctx = { params, create: c.type };
+      if (c.many) {
+        ctx = { params, listType: c.type };
+        env = pageScope(undefined, { listType: c.type, state: { ...s.session, ...page.state } });
+      } else if (c.create) ctx = { params, create: c.type };
       else {
         if (!params.length) err(at, `详情页（ctx.type = ${c.type}）的路由要带 :id 参数`);
-        env = pageScope(c.type);
+        env = pageScope(c.type, { state: { ...s.session, ...page.state } });
       }
     }
     if (!page.body?.length) err(at, "页面没有任何板块");
@@ -305,9 +454,11 @@ export const validate = (s: Sketch): Report => {
       check(n, env, ctx, `${at}.body[${i}]`, 1);
     });
   }
-  if (s.header) check(s.header, pageScope(undefined), { params: [] }, "header", 1);
+  if (s.header)
+    check(s.header, pageScope(undefined, { state: s.session }), { params: [] }, "header", 1);
   else err("header", "缺少 header");
-  if (s.footer) check(s.footer, pageScope(undefined), { params: [] }, "footer", 1);
+  if (s.footer)
+    check(s.footer, pageScope(undefined, { state: s.session }), { params: [] }, "footer", 1);
   else err("footer", "缺少 footer");
 
   if (errors.length === 0) warnings.push(...qualityWarnings(s)); // 结构都不对时，“设计问题”没有意义

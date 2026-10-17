@@ -3,7 +3,7 @@
  * 后台（#/_model）是运营的界面，永远是中文——它不走这里。
  * en 的类型是 typeof zh：加一个键两边都得有，漏了编译器会说。
  */
-import type { Sketch } from "../shared/schema.ts";
+import type { Sketch } from "./schema.ts";
 
 const zh = {
   home: "首页",
@@ -18,6 +18,8 @@ const zh = {
   no: "否",
   photos: (n: number) => `${n} 张`,
   rows: (n: number) => `${n} 行`,
+  blocks: (n: number) => `${n} 块内容`,
+  badBlocks: "内容树不是合法的 JSON 节点数组",
   remove: "移除",
   delete: "删除",
   unselected: "（未选）",
@@ -49,6 +51,8 @@ const en: Strings = {
   no: "No",
   photos: (n) => `${n} photo${n === 1 ? "" : "s"}`,
   rows: (n) => `${n} row${n === 1 ? "" : "s"}`,
+  blocks: (n) => `${n} block${n === 1 ? "" : "s"}`,
+  badBlocks: "The content tree is not a valid JSON array of nodes",
   remove: "Remove",
   delete: "Delete",
   unselected: "(none)",
@@ -68,4 +72,9 @@ const en: Strings = {
 };
 
 export const ZH: Strings = zh;
+
+/** 模板里 `ui.xxx` 能取到的键：纯字符串的那些（带参数的函数不是值）。 */
+export const UI_KEYS: ReadonlyArray<string> = Object.entries(zh)
+  .filter(([, v]) => typeof v === "string")
+  .map(([k]) => k);
 export const strings = (locale: Sketch["locale"]): Strings => (locale === "en" ? en : zh);

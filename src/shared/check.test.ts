@@ -3,17 +3,30 @@ import example from "../../examples/catalog.config.ts";
 import v1 from "./fixtures/catalog.v1.json";
 import { checkSketch } from "./check.ts";
 import {
+  accordion,
   action,
+  avg,
   bind,
   collection,
   count,
+  distinct,
   each,
+  embed,
+  fold,
   facts,
   fields,
+  filters,
   items,
+  linked,
+  manyOf,
+  nav,
+  sum,
+  oneOf,
   records,
   section,
+  tabs,
   text,
+  when,
 } from "./dsl.ts";
 import { migrateSketch, upgradeStored } from "./migrate.ts";
 import { parseSketch, sketchJsonSchema } from "./parse.ts";
@@ -177,10 +190,10 @@ describe("the environment: variables, paths, sources", () => {
     );
   });
 
-  it("count counts records or items, not fields", () => {
+  it("count counts records, items or distinct values, not fields", () => {
     expect(
       errorsOf(addTo(fresh(), "/", text(2, count({ fields: { type: "product" } })))),
-    ).toContain("count");
+    ).toContain("fold 只能折叠");
   });
 
   it("with can only carry values to a new-record form page, into fields it has", () => {
@@ -208,9 +221,7 @@ describe("internal (back-office-only) fields", () => {
     expect(errorsOf(addTo(fresh(), "/product/:id", facts({ only: ["status"] })))).toContain(
       "internal",
     );
-    const filter = fresh();
-    filter["pages"]["/product"].body[0].group[0].group[0].fields = ["status"];
-    expect(errorsOf(filter)).toContain("internal");
+    expect(errorsOf(addTo(fresh(), "/product", filters("status")))).toContain("internal");
   });
 });
 
@@ -369,7 +380,7 @@ describe("derived pages", () => {
 describe("format 1 → 2 (the old slots are each in disguise)", () => {
   it("the old example, written in the old language, upgrades to a valid sketch", () => {
     const up = migrateSketch(v1) as Json;
-    expect(up["v"]).toBe(2);
+    expect(up["v"]).toBe(4);
     const r = checkSketch(up);
     expect(r.errors).toEqual([]);
     expect(JSON.stringify(up)).not.toMatch(/"slot":"(collection|facts|badges|gallery)"/);
@@ -378,7 +389,7 @@ describe("format 1 → 2 (the old slots are each in disguise)", () => {
   it("an old sketch can still be loaded through parseSketch, and stored JSON is upgraded on read", () => {
     expect(parseSketch(v1).ok).toBe(true);
     const stored = JSON.stringify(v1);
-    expect(JSON.parse(upgradeStored(stored))["v"]).toBe(2);
+    expect(JSON.parse(upgradeStored(stored))["v"]).toBe(4);
     const current = JSON.stringify(example);
     expect(upgradeStored(current)).toBe(current);
   });
@@ -396,5 +407,269 @@ describe("format 1 → 2 (the old slots are each in disguise)", () => {
     expect(up["pages"]["/"].body[0]).toEqual(
       plain(collection("product", { limit: 2, where: { category: "pens" } })),
     );
+  });
+});
+
+describe("state: params, when, links", () => {
+  const withState = (route: string, state: Json, ...nodes: unknown[]): Json => {
+    const s = addTo(fresh(), route, ...nodes);
+    s["pages"][route].state = state;
+    return s;
+  };
+  const tabState = { tab: plain(oneOf(["a", "b"])) };
+
+  it("a tab strip and its panels check out when the parameter is declared", () => {
+    expect(
+      errorsOf(
+        withState(
+          "/",
+          tabState,
+          tabs("tab", [
+            ["a", "A", text(3, "x")],
+            ["b", "B", text(3, "y")],
+          ]),
+        ),
+      ),
+    ).toBe("");
+  });
+
+  it("when / set must name a declared parameter, and values must be in its domain", () => {
+    expect(errorsOf(addTo(fresh(), "/", when("tab=a", text(3, "x"))))).toContain(
+      "没有在这个页面的 state 里声明",
+    );
+    expect(errorsOf(withState("/", tabState, when("tab=zzz", text(3, "x"))))).toContain("取值只有");
+    expect(
+      errorsOf(withState("/", tabState, action("x", undefined, { set: { tab: "zzz" } }))),
+    ).toContain("取值只有");
+    expect(
+      errorsOf(withState("/", tabState, action("x", undefined, { set: { nope: "a" } }))),
+    ).toContain("nope");
+  });
+
+  it("set and to are exclusive; with needs a to", () => {
+    expect(
+      errorsOf(withState("/", tabState, action("x", "/inquiry", { set: { tab: "a" } }))),
+    ).toContain("只能写一个");
+    expect(errorsOf(addTo(fresh(), "/", action("x", undefined, { with: { a: "1" } })))).toContain(
+      "with 要和 to 一起写",
+    );
+  });
+
+  it("a state declaration needs values, a valid default, no default for multi, and must not collide with a field", () => {
+    expect(errorsOf(withState("/", { t: { values: [] } }, text(3, "x")))).toContain("取值不能为空");
+    expect(
+      errorsOf(withState("/", { t: { values: ["a"], default: "z" } }, text(3, "x"))),
+    ).toContain("default");
+    expect(
+      errorsOf(withState("/", { t: { values: ["a"], multi: true, default: "a" } }, text(3, "x"))),
+    ).toContain("没有 default");
+    const clash = fresh();
+    clash["pages"]["/product"].state = { category: plain(oneOf(["a", "b"])) };
+    expect(errorsOf(clash)).toContain("重名");
+  });
+
+  it("an accordion needs a multi-valued parameter's values; a multi parameter is allowed to have none selected", () => {
+    const s = withState(
+      "/",
+      { faq: plain(manyOf(["q1", "q2"])) },
+      accordion("faq", [
+        ["q1", "Q1", text(3, "a")],
+        ["q2", "Q2", text(3, "b")],
+      ]),
+    );
+    expect(errorsOf(s)).toBe("");
+  });
+
+  it("a group can be a link: to a route, or setting a parameter", () => {
+    const s = withState(
+      "/",
+      tabState,
+      linked(plain(section("x", text(3, "y"))) as never, { set: { tab: "b" } }),
+    );
+    expect(errorsOf(s)).toBe("");
+  });
+
+  it("facets only on a list page (or a detail page) and only over filterable, non-internal fields", () => {
+    expect(errorsOf(addTo(fresh(), "/", filters("category")))).toContain("才知道在哪个类型上筛选");
+    expect(errorsOf(addTo(fresh(), "/product", filters("code")))).toContain("只能筛");
+    expect(errorsOf(addTo(fresh(), "/product", filters("nope")))).toContain("nope");
+  });
+
+  it("options must come from a facets item; param must be declared", () => {
+    expect(
+      errorsOf(
+        addTo(fresh(), "/product", each({ options: "zzz" }, text(3, bind("o.label")), { as: "o" })),
+      ),
+    ).toContain("不是一个 facets 项");
+    expect(
+      errorsOf(addTo(fresh(), "/", each({ param: "nope" }, text(3, bind("o.label")), { as: "o" }))),
+    ).toContain("没有在这个页面的 state 里声明");
+  });
+
+  it("ui.xxx is the engine's own copy; an unknown key is an error", () => {
+    expect(errorsOf(addTo(fresh(), "/", text(3, bind("ui.clearFilters"))))).toBe("");
+    expect(errorsOf(addTo(fresh(), "/", text(3, bind("ui.nope"))))).toContain("ui 里没有这个键");
+  });
+
+  it("the nesting warning counts layout groups only: tone/link/each carry meaning (a filter panel is not 'deep')", () => {
+    expect(warningsOf(addTo(fresh(), "/product", filters("category", "materials")))).not.toContain(
+      "嵌套超过",
+    );
+  });
+});
+
+describe("format 2 → 3 (filters is links + state in disguise)", () => {
+  it("a v2 sketch with a filters leaf upgrades to exactly what the DSL writes now, and validates", () => {
+    const old = fresh();
+    old["v"] = 2;
+    old["pages"]["/product"].body[0].group[0].group[0] = {
+      slot: "filters",
+      fields: ["category", "materials"],
+      w: 1,
+    };
+    const up = migrateSketch(old) as Json;
+    expect(up["v"]).toBe(4);
+    expect(up["pages"]["/product"].body[0].group[0].group[0]).toEqual({
+      ...plain(filters("category", "materials")),
+      w: 1,
+    });
+    expect(checkSketch(up).errors).toEqual([]);
+  });
+});
+
+describe("fold and distinct", () => {
+  const at = (n: unknown) => errorsOf(addTo(fresh(), "/", n));
+  it("sum/min/max/avg need a number field of the records; count needs none", () => {
+    expect(at(text(3, sum(records("product"), "moq")))).toBe("");
+    expect(at(text(3, count(records("product"))))).toBe("");
+    expect(at(text(3, fold("sum", records("product"))))).toContain("需要 field");
+    expect(at(text(3, sum(records("product"), "code")))).toContain("要对数字字段折叠");
+    expect(at(text(3, sum(records("product"), "nope")))).toContain("nope");
+    expect(at(text(3, fold("count", records("product"), "moq")))).toContain("count 不需要 field");
+  });
+
+  it("fold only folds records / items / distinct; sum of distinct is meaningless", () => {
+    expect(at(text(3, count({ fields: { type: "product" } })))).toContain("fold 只能折叠");
+    expect(at(text(3, sum(distinct("product", "category"), "moq")))).toContain(
+      "不能对 distinct 折叠",
+    );
+  });
+
+  it("distinct needs a real, non-internal, scalar field", () => {
+    expect(
+      at(each(distinct("ghost", "category"), text(3, bind("o.label")), { as: "o" })),
+    ).toContain("ghost");
+    expect(at(each(distinct("product", "nope"), text(3, bind("o.label")), { as: "o" }))).toContain(
+      "nope",
+    );
+    expect(
+      at(each(distinct("product", "status"), text(3, bind("o.label")), { as: "o" })),
+    ).toContain("internal");
+    expect(
+      at(each(distinct("product", "photos"), text(3, bind("o.label")), { as: "o" })),
+    ).toContain("不能数");
+  });
+
+  it("a where value {x.value} must resolve in the environment", () => {
+    const ok = each(
+      distinct("product", "category"),
+      text(3, count(records("product", { where: { category: "{o.value}" } }))),
+      { as: "o" },
+    );
+    expect(at(ok)).toBe("");
+    expect(
+      at(text(3, count(records("product", { where: { category: "{nope.value}" } })))),
+    ).toContain("where 的");
+  });
+
+  it("a number field that only a fold shows is counted as shown (no 'never shown' warning)", () => {
+    const s = fresh();
+    s["model"]["product"].fields["price_hint"] = { kind: "number", label: "x" };
+    expect(warningsOf(s)).toContain("price_hint");
+    expect(warningsOf(addTo(s, "/", text(3, avg(records("product"), "price_hint"))))).not.toContain(
+      "price_hint",
+    );
+  });
+});
+
+describe("format 3 → 4 (count is a fold in disguise)", () => {
+  it("a v3 sketch with a count fill upgrades to a fold", () => {
+    const old = fresh();
+    old["v"] = 3;
+    old["pages"]["/"].body.push({
+      group: [{ slot: "text", size: 2, fill: { count: { records: "product" } } }],
+      dir: "col",
+      name: "n",
+    });
+    const up = migrateSketch(old) as Json;
+    expect(up["v"]).toBe(4);
+    const last = up["pages"]["/"].body.at(-1);
+    expect(last.group[0].fill).toEqual({ fold: { op: "count", of: { records: "product" } } });
+    expect(checkSketch(up).errors).toEqual([]);
+  });
+});
+
+describe("embed and blocks", () => {
+  const withArticle = (body: unknown): Json => {
+    const s = fresh();
+    s["model"]["article"].seed[0].body = body;
+    return s;
+  };
+  it("a blocks value must be a valid node tree in the same grammar as a page", () => {
+    expect(errorsOf(withArticle(plain([text(3, "ok")])))).toBe("");
+    expect(errorsOf(withArticle([{ slot: "hero" }]))).toContain("不是合法的节点树");
+    expect(errorsOf(withArticle("not a tree"))).toContain("不是合法的节点树");
+  });
+
+  it("the tree is content, not chrome: no embed / form / nav / brand inside, and binds must resolve against the record", () => {
+    expect(errorsOf(withArticle(plain([embed(bind("body"))])))).toContain("不能放 embed");
+    expect(errorsOf(withArticle(plain([nav("/")])))).toContain("不能放 nav");
+    expect(errorsOf(withArticle(plain([text(3, bind("nope"))])))).toContain("nope");
+    expect(errorsOf(withArticle(plain([text(3, bind("title"))])))).toBe("");
+  });
+
+  const articlePage = (...nodes: unknown[]): Json => {
+    const s = fresh();
+    s["pages"]["/article/:id"] = {
+      ctx: { type: "article" },
+      body: [plain(section("x", ...(nodes as Parameters<typeof section>[1][])))],
+    };
+    return s;
+  };
+  it("embed binds a blocks field, not any other", () => {
+    expect(errorsOf(articlePage(embed(bind("body"))))).toBe("");
+    expect(errorsOf(articlePage(embed(bind("title"))))).toContain("embed 要绑 blocks 字段");
+    expect(errorsOf(articlePage(embed()))).toContain("embed 要绑");
+  });
+
+  it("a blocks field is not a facts row (it has its own renderer), and counts as shown when embedded", () => {
+    expect(warningsOf(articlePage(text(1, bind("title"))))).toContain("body"); // 没人 embed 它：提醒
+    expect(warningsOf(fresh())).not.toContain("body");
+  });
+});
+
+describe("session parameters", () => {
+  const withSession = (extra: Json): Json => {
+    const s = fresh();
+    s["session"] = { ...(s["session"] as Json), ...extra };
+    return s;
+  };
+  it("a session parameter is known in the header, the footer and every page", () => {
+    expect(errorsOf(fresh())).toBe("");
+    const s = withSession({ city: plain(oneOf(["a", "b"])) });
+    s["footer"] = plain(when("city=a", text(3, "x")));
+    s["pages"]["/"].body.push(plain(when("city=b", section("c", text(3, "y")))));
+    expect(errorsOf(s)).toBe("");
+    const bare = fresh();
+    bare["footer"] = plain(when("city=a", text(3, "x")));
+    expect(errorsOf(bare)).toContain("没有在这个页面的 state 里声明");
+  });
+
+  it("declaration rules: values, default, multi, name; and a page may not redeclare it", () => {
+    expect(errorsOf(withSession({ v: { values: [] } }))).toContain("取值不能为空");
+    expect(errorsOf(withSession({ v: { values: ["a"], default: "z" } }))).toContain("default");
+    const s = withSession({ tab: plain(oneOf(["a", "b"])) });
+    s["pages"]["/"].state = { tab: plain(oneOf(["a", "b"])) };
+    expect(errorsOf(s)).toContain("重名");
   });
 });

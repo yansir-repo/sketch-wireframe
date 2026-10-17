@@ -3,7 +3,7 @@
  */
 import { Schema } from "effect";
 import { migrateSketch } from "./migrate.ts";
-import { Sketch } from "./schema.ts";
+import { NodeSchema, Sketch, type Node } from "./schema.ts";
 
 const decode = Schema.decodeUnknownResult(Sketch, { onExcessProperty: "error" });
 
@@ -28,3 +28,25 @@ export const parseSketch = (
 
 /** JSON Schema，给 get_schema 用。 */
 export const sketchJsonSchema = (): unknown => Schema.toJsonSchemaDocument(Sketch);
+
+const decodeNodes = Schema.decodeUnknownResult(Schema.Array(NodeSchema), {
+  onExcessProperty: "error",
+});
+
+/** 一个 blocks 字段里存的树：必须是一串合法的节点（和页面同一份 Schema）。 */
+export const parseNodes = (
+  input: unknown,
+): { ok: true; nodes: ReadonlyArray<Node> } | { ok: false; error: string } => {
+  const r = decodeNodes(input);
+  return r._tag === "Success"
+    ? { ok: true, nodes: r.success }
+    : {
+        ok: false,
+        error: String(r.failure)
+          .replace(/^SchemaError\(/, "")
+          .replace(/\)$/, "")
+          .split("\n")
+          .slice(0, 4)
+          .join(" "),
+      };
+};

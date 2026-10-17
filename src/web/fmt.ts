@@ -1,5 +1,5 @@
 /** 把记录里的值变成给人看的字符串：term 查词表名称，choice 查选项名称——存的是 id，显示的是名称。 */
-import { strings, type Strings } from "./strings.ts";
+import { strings, type Strings } from "../shared/strings.ts";
 import type { Field, Option, Row, Sketch } from "../shared/schema.ts";
 import type { Db } from "./db.ts";
 import { scalar } from "../shared/scalar.ts";
@@ -54,6 +54,8 @@ export const display = (
       return v ? L.yes : L.no;
     case "media":
       return Array.isArray(v) && v.length ? L.photos(v.length) : "";
+    case "blocks":
+      return Array.isArray(v) && v.length ? L.blocks(v.length) : "";
     case "list":
       return Array.isArray(v) && v.length ? L.rows(v.length) : "";
     default:

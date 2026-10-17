@@ -7,7 +7,8 @@
  *   @title = 一条记录的显示名。
  */
 import { factFields } from "./facts.ts";
-import type { Each, Field, Node, Sketch, Source } from "./schema.ts";
+import type { Each, Field, Node, Page, ParamDecl, Sketch, Source } from "./schema.ts";
+import { UI_KEYS } from "./strings.ts";
 
 export type Var =
   | { readonly kind: "record"; readonly type: string }
@@ -18,19 +19,48 @@ export type Var =
       readonly names: ReadonlyArray<string>;
     }
   | { readonly kind: "photo" }
-  | { readonly kind: "row"; readonly columns: ReadonlyArray<string> };
+  | { readonly kind: "row"; readonly columns: ReadonlyArray<string> }
+  /** facets 来源的一项（一个筛选字段）：label / field。 */
+  | { readonly kind: "facet"; readonly type: string }
+  /** 一个选项（facets 的某个字段的某个值，或一个状态参数的某个取值）：label / value / count。 */
+  | { readonly kind: "option" };
 
 export type Scope = {
   readonly vars: ReadonlyMap<string, Var>;
   /** 当前记录的变量名（没有 = 页面上没有记录）。 */
   readonly it: string | undefined;
+  /** 列表页在列哪个类型（facets 要知道）。 */
+  readonly listType?: string;
+  /** 这个页面声明的状态参数。 */
+  readonly state: Readonly<Record<string, ParamDecl>>;
 };
 
 /** 页面的环境：有记录的页面（详情页）里，`page` 和 `it` 都是那条记录。 */
-export const pageScope = (recordType: string | undefined): Scope =>
-  recordType
-    ? { vars: new Map([["page", { kind: "record", type: recordType }]]), it: "page" }
-    : { vars: new Map(), it: undefined };
+export const pageScope = (
+  recordType: string | undefined,
+  o: { listType?: string; state?: Readonly<Record<string, ParamDecl>> } = {},
+): Scope => ({
+  vars: recordType ? new Map([["page", { kind: "record", type: recordType }]]) : new Map(),
+  it: recordType ? "page" : undefined,
+  ...(o.listType ? { listType: o.listType } : {}),
+  state: o.state ?? {},
+});
+
+/** 一个页面的环境：详情页有 page 记录，列表页知道列的是哪个类型，页面声明的状态参数。 */
+export const scopeOfPage = (
+  page: Page,
+  session: Readonly<Record<string, ParamDecl>> = {},
+): Scope => {
+  const c = page.ctx;
+  return pageScope(c && !c.many && !c.create ? c.type : undefined, {
+    ...(c?.many ? { listType: c.type } : {}),
+    state: { ...session, ...page.state },
+  });
+};
+
+/** 一个参数是不是“多选”：声明里写了 multi，或者它是筛选的参数（筛选字段本来就是多选取并集）。 */
+export const isMultiParam = (scope: Scope, name: string): boolean =>
+  scope.state[name] ? scope.state[name]!.multi === true : true;
 
 // ---- 路径 ----
 
@@ -92,6 +122,13 @@ export const resolveStatic = (
   let rest = segs;
   let v: Var | undefined;
   const first = segs[0]!;
+  // ui.xxx：引擎自带的文案（按草图的 locale），不是作者的文案
+  if ("lit" in first && first.lit === "ui" && !scope.vars.has("ui")) {
+    const k = segs[1];
+    return segs.length === 2 && k && "lit" in k && UI_KEYS.includes(k.lit)
+      ? { ok: true, target: { kind: "scalar" } }
+      : { ok: false, error: `“${path}”：ui 里没有这个键（有：${UI_KEYS.join("、")}）` };
+  }
   if ("lit" in first && scope.vars.has(first.lit)) {
     v = scope.vars.get(first.lit);
     rest = segs.slice(1);
@@ -127,6 +164,16 @@ export const resolveStatic = (
           ? { kind: "entry-value", type: v.type, names: v.names }
           : { kind: "scalar" },
     };
+  }
+  if (v.kind === "facet") {
+    if ("dyn" in seg || !["label", "field"].includes(seg.lit))
+      return { ok: false, error: `“${path}”：筛选字段这一项只有 label / field` };
+    return { ok: true, target: { kind: "scalar" } };
+  }
+  if (v.kind === "option") {
+    if ("dyn" in seg || !["label", "value", "count"].includes(seg.lit))
+      return { ok: false, error: `“${path}”：选项只有 label / value / count` };
+    return { ok: true, target: { kind: "scalar" } };
   }
   // record
   const def = s.model[v.type];
@@ -188,6 +235,36 @@ export const bindSource = (
     if (!s.model[type]) return { ok: false, error: `fields 的类型 ${type} 不存在` };
     return { ok: true, var: { kind: "entry", type, names: factFields(s, type, f) } };
   }
+  if ("facets" in source) {
+    const t =
+      scope.listType ??
+      (scope.vars.get("page")?.kind === "record"
+        ? (scope.vars.get("page") as { type: string }).type
+        : undefined);
+    return t
+      ? { ok: true, var: { kind: "facet", type: t } }
+      : { ok: false, error: "facets 要放在列表页（ctx.many）或详情页里，才知道在哪个类型上筛选" };
+  }
+  if ("options" in source) {
+    const v = scope.vars.get(source.options);
+    return v?.kind === "facet"
+      ? { ok: true, var: { kind: "option" } }
+      : { ok: false, error: `options 的 ${source.options} 不是一个 facets 项` };
+  }
+  if ("param" in source)
+    return scope.state[source.param]
+      ? { ok: true, var: { kind: "option" } }
+      : { ok: false, error: `param 的 ${source.param} 没有在这个页面的 state 里声明` };
+  if ("distinct" in source) {
+    const d = source.distinct;
+    const fd = s.model[d.type]?.fields[d.field];
+    if (!s.model[d.type]) return { ok: false, error: `distinct 的类型 ${d.type} 不存在` };
+    if (!fd) return { ok: false, error: `distinct 的字段 ${d.field} 不在类型 ${d.type} 里` };
+    if (fd.internal) return { ok: false, error: `distinct 的字段 ${d.field} 是 internal` };
+    if (["media", "list"].includes(fd.kind))
+      return { ok: false, error: `distinct 不能数 ${fd.kind} 字段` };
+    return { ok: true, var: { kind: "option" } };
+  }
   const r = resolveStatic(s, scope, source.items);
   if (!r.ok) return r;
   if (r.target.kind !== "field")
@@ -209,7 +286,7 @@ export const bindSource = (
 export const withVar = (scope: Scope, name: string, v: Var): Scope => {
   const vars = new Map(scope.vars);
   vars.set(name, v);
-  return { vars, it: v.kind === "record" ? name : scope.it };
+  return { ...scope, vars, it: v.kind === "record" ? name : scope.it };
 };
 
 // ---- 遍历 ----

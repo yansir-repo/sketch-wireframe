@@ -8,10 +8,12 @@ import type { Db } from "./db.ts";
 import { esc, asOption, titleField } from "./fmt.ts";
 import type { Field, Row, Sketch } from "../shared/schema.ts";
 import { scalar } from "../shared/scalar.ts";
-import { strings, ZH, type Strings } from "./strings.ts";
+import { strings, ZH, type Strings } from "../shared/strings.ts";
 
 export const MAX_PHOTOS = 6;
 const KEY_RE = /^[A-Za-z0-9._-]+$/;
+/** blocks 字段里的内容不是 JSON 节点数组：保存时拒收。 */
+const BAD_BLOCKS = Symbol("bad-blocks");
 const rid = () => "r" + Math.random().toString(36).slice(2, 8);
 
 type Photo = { dataUrl: string; caption?: string };
@@ -107,6 +109,9 @@ const control = (
         <span class="hint">${esc(L.maxPhotosHint(MAX_PHOTOS))}</span>
       </div>`;
     }
+    case "blocks":
+      // 一棵树在表单里就是它的 JSON：改完保存时按节点语法校验（后台才有这个字段；客户的公开表单里不会有）
+      return `<wired-textarea rows="8" placeholder="[ { &quot;slot&quot;: &quot;text&quot;, &quot;size&quot;: 3, &quot;fill&quot;: &quot;…&quot; } ]"${dis}>${esc(Array.isArray(value) && value.length ? JSON.stringify(value, null, 1) : "")}</wired-textarea>`;
     case "list": {
       const rows = (Array.isArray(value) ? value : []) as Row[];
       return `<div data-list data-columns="${esc(JSON.stringify(fd.columns))}">
@@ -162,6 +167,18 @@ export const readField = (container: Element | Document, name: string, fd: Field
         dataUrl: el.dataset.src!,
         caption: el.dataset.caption || undefined,
       }));
+    case "blocks": {
+      const raw = (
+        (wrap.querySelector("wired-textarea") as { value?: string } | null)?.value ?? ""
+      ).trim();
+      if (raw === "") return [];
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : BAD_BLOCKS;
+      } catch {
+        return BAD_BLOCKS;
+      }
+    }
     case "list":
       return [...wrap.querySelectorAll<HTMLElement>(".lrow")]
         .map((r) => ({
@@ -244,6 +261,7 @@ export const collectRow = (
   for (const [name, fd] of Object.entries(def.fields)) {
     if (name === def.key) continue;
     const v = readField(form, name, fd);
+    if (v === BAD_BLOCKS) return { ok: false, message: L.badBlocks };
     if (v !== undefined) row[name] = v;
   }
   if (editingKey) row[def.key] = editingKey;

@@ -4,7 +4,7 @@
  * 语义：同一字段内多选 = 并集，不同字段之间 = 交集；选项旁的数字 = “在其余条件都满足的前提下，再选它会剩几个”。
  */
 import { isLinkKind } from "../shared/schema.ts";
-import { strings, type Strings } from "./strings.ts";
+import { strings, type Strings } from "../shared/strings.ts";
 import type { Db } from "./db.ts";
 import { keyOf, titleFieldOf } from "../shared/derive.ts";
 import { asOption, esc } from "./fmt.ts";

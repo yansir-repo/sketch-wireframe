@@ -11,12 +11,14 @@ import { FORMAT_VERSION } from "./schema.ts";
 import type {
   Atom,
   Bind,
-  Count,
+  Fold,
+  FoldOp,
   Each,
   Field,
   Fill,
   Group,
   Node,
+  ParamDecl,
   Option,
   Row,
   Sketch,
@@ -24,6 +26,7 @@ import type {
   TextSize,
   Tone,
   TypeDef,
+  When,
 } from "./schema.ts";
 
 // ---- 排列 ----
@@ -56,8 +59,16 @@ export const span = <T extends Node>(w: number, n: T): T => ({ ...n, w }) as T;
 
 // ---- 填充 ----
 export const bind = (path: string): Bind => ({ bind: path });
-/** 对一个来源的计数。 */
-export const count = (source: Source): Count => ({ count: source });
+/** 对一个来源折叠成一个值。 */
+export const fold = (op: FoldOp, of: Source, field?: string): Fold => ({
+  fold: { op, of, ...(field === undefined ? {} : { field }) },
+});
+/** 数项数（“本分类共 12 个型号”）。 */
+export const count = (of: Source): Fold => fold("count", of);
+export const sum = (of: Source, field: string): Fold => fold("sum", of, field);
+export const min = (of: Source, field: string): Fold => fold("min", of, field);
+export const max = (of: Source, field: string): Fold => fold("max", of, field);
+export const avg = (of: Source, field: string): Fold => fold("avg", of, field);
 
 // ---- 叶子 ----
 export const text = (size: TextSize, fill?: Fill, opts: { circle?: boolean } = {}): Atom => ({
@@ -73,13 +84,18 @@ export const image = (fill?: Fill): Atom => ({
 export const action = (
   fill?: Fill,
   to?: string,
-  opts: { ghost?: boolean; with?: Record<string, string | Bind> } = {},
+  opts: {
+    ghost?: boolean;
+    with?: Record<string, string | Bind>;
+    set?: Record<string, string | Bind>;
+  } = {},
 ): Atom => ({
   slot: "action",
   ...(fill === undefined ? {} : { fill }),
   ...(to === undefined ? {} : { to }),
   ...(opts.ghost ? { ghost: true } : {}),
   ...(opts.with ? { with: opts.with } : {}),
+  ...(opts.set ? { set: opts.set } : {}),
 });
 /** 品牌：logo 或字标，点它回首页。没填 = 粗波浪线字标。 */
 export const brand = (fill?: Fill, to = "/"): Atom => ({
@@ -88,9 +104,12 @@ export const brand = (fill?: Fill, to = "/"): Atom => ({
   to,
 });
 export const nav = (...paths: string[]): Atom => ({ slot: "nav", paths });
-/** 筛选：字段由模型推出（term/ref/choice/bool），这里只选哪些字段出现。 */
-export const filters = (...fields: string[]): Atom => ({ slot: "filters", fields });
 export const form = (): Atom => ({ slot: "form" });
+/** 渲染一个 blocks 字段里存的树（文章正文）。 */
+export const embed = (fill?: Fill): Atom => ({
+  slot: "embed",
+  ...(fill === undefined ? {} : { fill }),
+});
 
 // ---- 生成 ----
 export type ArrangeOpts = {
@@ -126,8 +145,69 @@ export const records = (
 export const fields = (
   opts: { of?: string; type?: string; only?: string[]; skip?: string[] } = {},
 ): Source => ({ fields: opts });
+/** 某个类型的某个字段出现过的各个值，每项有 label / value / count（有这个值的记录数）：分组统计。 */
+export const distinct = (type: string, field: string): Source => ({ distinct: { type, field } });
 /** 一个多值字段里的各项（term/ref 的各条记录、图片、列表的各行）。 */
 export const items = (path: string): Source => ({ items: path });
+
+// ---- 状态：参数 + 条件出现 + 可点的组 ----
+
+/** 单选的状态参数（标签页）：取值有限，没有值时取 default（默认第一个）。 */
+export const oneOf = (values: string[], dflt?: string): ParamDecl => ({
+  values,
+  default: dflt ?? values[0],
+});
+/** 多选的状态参数（手风琴）：可以同时有几个值，默认一个都没有。 */
+export const manyOf = (values: string[]): ParamDecl => ({ values, multi: true });
+
+/** 条件出现。`"tab=specs"` = tab 等于 specs；`"open=q1"` 对多选参数是“包含”；`"a|b"` = 几个参数里任意一个有值。 */
+export const when = <T extends Node>(cond: string | When, n: T): T => {
+  const w: When =
+    typeof cond !== "string"
+      ? cond
+      : (() => {
+          const [p, is] = cond.split("=");
+          const names = p!.split("|");
+          return {
+            param: names.length === 1 ? names[0]! : names,
+            ...(is === undefined ? {} : { is }),
+          };
+        })();
+  return { ...n, when: w } as T;
+};
+
+/** 让一个组成为链接：去 to（带上 with），或者改当前页的状态参数（set）。选中与否由地址里的参数推出。 */
+export const linked = <T extends Group | Each>(
+  n: T,
+  link: { to?: string; with?: Record<string, string | Bind>; set?: Record<string, string | Bind> },
+): T => ({ ...n, link }) as T;
+
+/**
+ * 标签页：一排标签头（点它改参数）+ 每个标签自己的内容（参数等于它才出现）。状态参数要在页面的 state 里声明
+ * （`state: { tab: oneOf(["a", "b"]) }`）。每个状态都在地址里（?tab=b），所以每个标签都能被分享、被验证器逐个点到。
+ */
+export const tabs = (
+  param: string,
+  items: Array<[value: string, label: string, ...body: Node[]]>,
+): Group =>
+  col(
+    row(
+      ...items.map(([v, label]) => action(label, undefined, { ghost: true, set: { [param]: v } })),
+    ),
+    ...items.map(([v, , ...body]) => when({ param, is: v }, col(...body))),
+  );
+
+/** 手风琴：每一条有标题（点它切换展开）和内容（展开了才出现）。参数是多选的：`state: { faq: manyOf([...]) }`。 */
+export const accordion = (
+  param: string,
+  items: Array<[value: string, title: string, ...body: Node[]]>,
+): Group =>
+  col(
+    ...items.flatMap(([v, title, ...body]) => [
+      action(title, undefined, { ghost: true, set: { [param]: v } }),
+      when({ param, is: v }, col(...body)),
+    ]),
+  );
 
 // ---- 简写：都只是几行 each ----
 
@@ -152,6 +232,48 @@ export const badges = (field: string): Each =>
 /** 图片字段的图库（点开放大）。 */
 export const gallery = (field: string): Each =>
   each(items(field), image(bind("it")), { dir: "row" });
+
+/**
+ * 筛选：列表页上这些字段的筛选面。**不是槽**：每个选项是一个“改状态参数”的链接（参数名就是字段名，多选取并集），
+ * 选项旁的数字是“再选它还剩几个”，选中/没得选的样子由参数推出；“清除”是把这几个参数清掉的链接，只在有选择时出现。
+ * 文字“清除筛选”来自 ui（引擎自带、跟着 locale）。
+ */
+export const filters = (...fields: string[]): Group => ({
+  group: [
+    each(
+      { facets: fields },
+      {
+        group: [
+          text(3, bind("f.label")),
+          each(
+            { options: "f" },
+            linked(
+              {
+                group: [text(3, bind("o.label")), text(3, bind("o.count"))],
+                dir: "row",
+                tone: "opt",
+              },
+              { set: { "{f.field}": bind("o.value") } },
+            ),
+            { as: "o", dir: "col" },
+          ),
+        ],
+        dir: "col",
+        tone: "facet",
+      },
+      { as: "f", dir: "col" },
+    ),
+    when(
+      { param: fields },
+      linked(
+        { group: [text(3, bind("ui.clearFilters"))], dir: "row", tone: "clear" },
+        { set: Object.fromEntries(fields.map((f) => [f, ""])) },
+      ),
+    ),
+  ],
+  dir: "col",
+  tone: "facets",
+});
 
 /**
  * 对比表：一个类型的几个字段（行）× 若干条记录（列）。字段名是行头，每一格是那条记录的那个字段——
@@ -213,6 +335,12 @@ export const f = {
     to: string,
     o: { multiple?: boolean; table?: boolean; detail?: boolean; internal?: boolean } = {},
   ): Field => ({ kind: "ref", label, to, ...o }),
+  /** 值是一棵树（和页面同一套语法）：文章正文这类“内容本身有结构”的字段。用 embed(bind("字段")) 渲染。 */
+  blocks: (label: string, o: { detail?: boolean; internal?: boolean } = {}): Field => ({
+    kind: "blocks",
+    label,
+    ...o,
+  }),
   media: (label: string, o: { detail?: boolean; internal?: boolean } = {}): Field => ({
     kind: "media",
     label,

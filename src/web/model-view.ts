@@ -4,7 +4,7 @@
  * 真·CRUD：增删改立即生效、状态落 localStorage（见 db.ts）。
  */
 import { isLinkKind } from "../shared/schema.ts";
-import { ZH } from "./strings.ts";
+import { ZH } from "../shared/strings.ts";
 import type { Db } from "./db.ts";
 import { renderForm } from "./fields.ts";
 import { applySel, facetHtml, facetsOf, parseQuery, toQuery, type Sel } from "./facets.ts";
@@ -30,6 +30,7 @@ const KIND: Record<string, string> = {
   term: "选词",
   media: "图片",
   list: "参数表",
+  blocks: "内容树",
 };
 
 /** 数据结构图：每个类型一个框、字段逐行；选词字段连一条箭头到词表。由模型直接画出，不需要任何表达。 */

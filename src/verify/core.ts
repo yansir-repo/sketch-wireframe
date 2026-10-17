@@ -320,6 +320,9 @@ export const runChecks = async (
     }
     await page.setViewport({ width: 1100, height: 900 });
 
+    // 逐个状态点过之后清掉浏览器里存着的会话参数：别让“最后点到的那个取值”泄漏进项目自己的流程
+    await page.evaluate(() => localStorage.clear());
+
     // ---- 项目自己的流程 ----
     if (o.flow) {
       await load("#/");

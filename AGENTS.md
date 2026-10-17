@@ -30,12 +30,16 @@
 - 验证有两个宿主、一份检查：`src/verify/core.ts`（页面从哪来不是它的事）。线上是 Browser Rendering（`remote.ts` → `browser.ts` 这个 Effect 服务 → MCP 的 `verify_sketch`），本机是 `scripts/verify.ts`。项目自己的流程脚本只能本机跑。
 - `src/worker/tsconfig.json` 带了 `DOM` lib，只因为 `src/verify` 里 `page.evaluate` 的回调要过类型检查；**Worker 代码不能用 DOM 全局**（编译器现在拦不住）。
 
-## 语言的形状：叶子、排列、生成
+## 语言的形状：叶子、排列、生成，加上状态
 
-- **只有三种东西**（`src/shared/schema.ts`）：叶子（text/image/action/brand/nav/filters/form）、排列（col/row/grid）、生成（`each`：对 records / fields / items 逐项生成）。`collection / facts / badges / gallery / compare / steps` **不是槽**，是 `dsl.ts` 里几行 `each` 的简写。**新需求先问：这是对哪个关系、逐项生成什么？** 不要加槽；真要加叶子，先说明它为什么不是某个 each + 已有叶子的组合。
-- **环境**：页面记录叫 `page`，each 的每一项叫它的 `as`。bind 路径的**语法**和静态解析只在 `src/shared/scope.ts`（体检、质量提醒、引擎运行时求值都用它的 `parsePath`）。树的遍历（带着每处的环境）也只在那里。
-- **链接带环境**：`action.with` 写进目标地址的 `?query`，目标页的新增表单读它当初始值——和筛选状态是同一个机制（地址即状态）。不要为“把上下文带过去”另造机制。
-- **格式版本**：`FORMAT_VERSION`（现在 2）。1 → 2 是把四个槽改写成 `each`（`src/shared/migrate.ts`，读时升级，库里的旧 JSON 原样不动）。这个函数同时是个证明：旧语言能表达的，新语言一个不少；`check.test.ts` 拿旧范例（`fixtures/catalog.v1.json`）逐个对。**移除条件**：库里再没有 `v:1` 的版本（查库：`SELECT count(*) FROM sketch_versions WHERE json LIKE '%"v":1,%'`）。
+- **只有这些东西**（`src/shared/schema.ts`）：叶子（text/image/action/brand/nav/form/embed）、排列（col/row/grid，可带 when / link）、生成（`each`：对 records / fields / items / distinct / facets / options / param 逐项生成）。`collection / facts / badges / gallery / filters / compare / steps / tabs / accordion` **不是槽**，是 `dsl.ts` 里几行的简写。**新需求先问：这是对哪个关系逐项生成什么、或者环境里多了什么？** 不要加槽；真要加叶子，先说明它为什么不是已有东西的组合。
+- **环境**：命名绑定（页面记录 `page`、each 的 `as`）+ **状态参数**。bind 路径的语法和静态解析、树的遍历（带着每处的环境）只在 `src/shared/scope.ts`；引擎运行时对同一套路径求值。
+- **状态只有一个家：地址的 `?query`**（页面级参数、筛选、会话级参数的显式值）；会话级参数另存浏览器里（换页不丢）。控制它的是链接（`action.set` / 组的 `link`），显示由 `when`。**不要为“页面内状态”另造机制**——标签页、手风琴、筛选、角色都是同一个东西；每个声明过的取值都是可以直接打开的页面，验证器逐个点到（`sampleRoutes`）。
+- **链接带环境**：`action.with` 写进目标地址的 `?query`，目标页的新增表单读它当初始值。
+- **fold 是一簇封闭的运算**（count/sum/min/max/avg）；没有数据时画波浪线，不编。别的计算不加（声明“算出来的”就够）。
+- **blocks / embed**：字段的值可以是一棵同样语法的树；被嵌进去的树里不能再有 embed/form/nav/brand（校验挡，引擎再保一道：一定终止）。
+- **tone 是引擎的外观词汇，不是结构**（accent/card/pair/opt/facet/facets/clear）。它在涨——每加一个都要回答“这是不是在给结构加外观”。嵌套层数只数纯排版的组（有 tone/link/rule/seq 的组和 each 不算）。
+- **格式版本**：`FORMAT_VERSION`（现在 4）。旧的由 `src/shared/migrate.ts` 读时一步步升级（1→2 四个槽成了 each；2→3 filters 成了状态+链接；3→4 count 成了 fold），库里的旧 JSON 原样不动。它同时是个证明：旧语言能表达的，新语言一个不少；`check.test.ts` 逐步对。**移除条件**：库里再没有旧版本（查库：`SELECT count(*) FROM sketch_versions WHERE json NOT LIKE '%"v":4,%'`）。
 
 ## 引擎的硬规矩（它们是 bug 的类，不是个案）
 

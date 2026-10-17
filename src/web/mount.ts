@@ -15,7 +15,7 @@ import { parseQuery } from "./facets.ts";
 import { createDb } from "./db.ts";
 import { matchRoute, pagesOf, referrersOf } from "../shared/derive.ts";
 import { drawAll, rowLineSrc } from "./draw.ts";
-import { strings, ZH } from "./strings.ts";
+import { strings, ZH } from "../shared/strings.ts";
 import { collectRow, listRowHtml, MAX_PHOTOS, photoHtml, shrinkImage } from "./fields.ts";
 import { esc, recordTitle, titleField, vocabLabel } from "./fmt.ts";
 import { renderModelView } from "./model-view.ts";
@@ -56,6 +56,28 @@ export const mount = (sketch: Sketch): void => {
   let fid: Fidelity = readFid();
   let pendingToast: string | null = null;
 
+  // 会话级参数（谁在看……）存在浏览器里：换页不丢；地址里写了就以地址为准，并记下来
+  const sessionKey = `sketch:${sketch.code}:session`;
+  const readStored = (): Record<string, string[]> => {
+    try {
+      return JSON.parse(localStorage.getItem(sessionKey) ?? "{}") as Record<string, string[]>;
+    } catch {
+      return {};
+    }
+  };
+  const persistSession = () => {
+    const names = Object.keys(sketch.session ?? {});
+    if (names.length === 0) return;
+    const sel = parseQuery(loc().qs);
+    const next = { ...readStored() };
+    for (const n of names) if (sel[n]?.length) next[n] = sel[n]!;
+    try {
+      localStorage.setItem(sessionKey, JSON.stringify(next));
+    } catch {
+      /* 存不下就只在地址里生效 */
+    }
+  };
+
   const rcFor = (extra: Partial<RC> = {}): RC => ({
     s: sketch,
     db,
@@ -63,6 +85,8 @@ export const mount = (sketch: Sketch): void => {
     pages,
     params: {},
     vars: new Map(),
+    state: { ...sketch.session },
+    stored: readStored(),
     seq: { n: 0 },
     viewer,
     sel: parseQuery(loc().qs),
@@ -133,7 +157,7 @@ export const mount = (sketch: Sketch): void => {
     if (!m) return { html: notFound(), title: "404" };
     const page = pages[m.pattern]!;
     const ctx = page.ctx ?? null;
-    let rc = rcFor({ params: m.params });
+    let rc = rcFor({ params: m.params, state: { ...sketch.session, ...page.state } });
     let title = page.name ?? (ctx ? sketch.model[ctx.type]?.label : undefined) ?? m.pattern;
     // 面包屑的根：首页自己的名字（作者起的），没起才用引擎的默认词
     let trail: Array<[string, string?]> = [[pages["/"]?.name ?? strings(sketch.locale).home, "/"]];
@@ -198,6 +222,7 @@ export const mount = (sketch: Sketch): void => {
   };
 
   const render = () => {
+    persistSession();
     const r = renderRoute();
     const app = $("#app");
     app.innerHTML = r.html;
@@ -368,6 +393,16 @@ export const mount = (sketch: Sketch): void => {
   // 只有换了页面才回到顶部；同一页里改筛选/翻页不该把人弹回去
   window.addEventListener("hashchange", () => {
     document.querySelectorAll("nav.open").forEach((x) => x.classList.remove("open"));
+    // 页眉页脚也可能随会话参数变（“谁在看”）：参数一变就重画
+    if (sketch.session) {
+      persistSession();
+      renderChrome();
+      requestAnimationFrame(() => {
+        fitNavs();
+        drawAll(document.getElementById("header-body")!.parentElement!);
+        drawAll(document.getElementById("footer-body")!.parentElement!);
+      });
+    }
     render();
     if (loc().path !== lastPath) window.scrollTo(0, 0);
     lastPath = loc().path;
@@ -410,6 +445,14 @@ export const mount = (sketch: Sketch): void => {
           );
       }
     }
+    // 状态都在地址里，所以每个状态都是一个可以直接打开的页面：把每个声明过的参数的每个取值都列出来，验证器逐个点到
+    for (const [pattern, page] of Object.entries(pages))
+      for (const [name, decl] of Object.entries(page.state ?? {}))
+        for (const base of out.filter((p) => !p.includes("?") && matchRoute([pattern], p)))
+          for (const v of decl.values) out.push(`${base}?${name}=${v}`);
+    // 会话级参数的每个取值也是一个可以直接打开的页面
+    for (const [name, decl] of Object.entries(sketch.session ?? {}))
+      for (const v of decl.values) out.push(`/?${name}=${v}`);
     out.push("/_model");
     for (const [t2, def] of Object.entries(sketch.model)) {
       out.push(`/_model/${t2}`, `/_model/${t2}/new`);

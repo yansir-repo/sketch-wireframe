@@ -114,6 +114,86 @@ export default async function flow({ page, go, sleep, check, load }) {
   await go("#/category/pens");
   check("count：分类页显示本分类的型号数", await ev(() => document.body.textContent.includes("5")));
 
+  // ---- 状态：标签页、手风琴——点标题改地址里的参数，内容跟着出现/消失；清掉参数回到默认 ----
+  await go("#/product/P101");
+  const onFirst = await ev(() => document.body.textContent.includes("尺寸"));
+  check("标签页：默认显示第一个标签（技术参数）", onFirst);
+  await page.click('a.btn[href*="tab=related"]');
+  await sleep(300);
+  check(
+    "标签页：点另一个标签，地址里有 ?tab=related，内容换了",
+    (await hash()).includes("tab=related") &&
+      !(await ev(() => document.body.textContent.includes("尺寸"))),
+  );
+  await go("#/inquiry");
+  const faqClosed = await count('a.btn[href*="faq="]');
+  await page.click('a.btn[href*="faq=lead"]');
+  await sleep(300);
+  check("手风琴：点标题展开，地址里有 ?faq=lead", (await hash()).includes("faq=lead"));
+  await page.click('a.btn[href$="faq=lead,pack"]');
+  await sleep(300);
+  check(
+    "手风琴：多选——再展开另一条，两条都在地址里",
+    (await hash()).includes("faq=lead,pack"),
+    await hash(),
+  );
+  check("手风琴：有两个标题", faqClosed === 2);
+
+  // ---- fold / distinct：计数、最小值、分组统计 ----
+  await go("#/");
+  const groups = await ev(
+    () => document.querySelectorAll('[data-section="各分类型号数"] .grp.pair').length,
+  );
+  check("distinct：每个分类一行，带各自的型号数", groups === 4, String(groups));
+  await go("#/category/pens");
+  const stats = await ev(() => document.querySelector('[data-section="概览"]')?.textContent ?? "");
+  check("fold：本分类的型号数和最低起订量算出来了", /\d/.test(stats) && /100/.test(stats), stats);
+
+  // ---- embed：文章正文是一棵存在数据里的树，详情页把它渲染出来 ----
+  await go("#/article/a1");
+  const body = await ev(() => ({
+    embed: document.querySelectorAll(".embed").length,
+    kids: document.querySelectorAll(".embed > *").length,
+  }));
+  check("embed：正文这棵树被渲染出来", body.embed === 1 && body.kids >= 3, JSON.stringify(body));
+  await go("#/_model/article/a1/edit");
+  check(
+    "后台：内容树字段在表单里是 JSON 文本框",
+    (await count('[data-field="body"] wired-textarea')) === 1,
+  );
+  await page.$eval('[data-field="body"] wired-textarea', (el) => (el.value = "not json"));
+  await page.click('[data-act="submit"]');
+  await sleep(300);
+  check("后台：内容树不是合法 JSON 数组就拒收", (await hash()).endsWith("/edit"));
+
+  // ---- 会话参数（谁在看）：切换后换页不丢；页眉随之变化；地址里写了以地址为准 ----
+  await load("#/");
+  check(
+    "会话：默认是访客，页眉有“会员登录”",
+    await ev(() => document.querySelector("#header-body").textContent.includes("会员登录")),
+  );
+  await go("#/product/P101");
+  check("会话：访客看不到“会员资料”", (await count('[data-section="会员资料"]')) === 0);
+  await page.click('#header-body a.btn[href*="viewer=member"]');
+  await sleep(400);
+  check(
+    "会话：点“会员登录”，地址里有 ?viewer=member，页眉变成“退出登录”",
+    (await hash()).includes("viewer=member") &&
+      (await ev(() => document.querySelector("#header-body").textContent.includes("退出登录"))),
+  );
+  check("会话：会员看得到“会员资料”", (await count('[data-section="会员资料"]')) === 1);
+  await page.click('#header-body nav a[href="#/product"]');
+  await sleep(400);
+  check(
+    "会话：换页（地址里没有参数）后仍是会员",
+    await ev(() => document.querySelector("#header-body").textContent.includes("退出登录")),
+  );
+  await load("#/product/P101");
+  check("会话：刷新后仍是会员（存在浏览器里）", (await count('[data-section="会员资料"]')) === 1);
+  await go("#/product/P101?viewer=visitor");
+  check("会话：地址里写了就以地址为准", (await count('[data-section="会员资料"]')) === 0);
+  await ev(() => localStorage.removeItem("sketch:EX-CATALOG:session"));
+
   // ---- 客户页筛选：并集/交集、地址即状态、清除 ----
   await go("#/product");
   const expected = (m, c) =>

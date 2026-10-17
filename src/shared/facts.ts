@@ -16,7 +16,9 @@ export const factFields = (
   if (opts.only)
     return opts.only.filter((n) => {
       const fd = def.fields[n];
-      return fd !== undefined && fd.kind !== "media" && fd.internal !== true;
+      return (
+        fd !== undefined && fd.kind !== "media" && fd.kind !== "blocks" && fd.internal !== true
+      );
     });
   return Object.entries(def.fields)
     .filter(
@@ -24,6 +26,7 @@ export const factFields = (
         n !== def.key &&
         n !== title &&
         fd.kind !== "media" &&
+        fd.kind !== "blocks" &&
         fd.detail !== false &&
         fd.internal !== true &&
         !(opts.skip ?? []).includes(n),

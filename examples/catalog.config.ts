@@ -3,6 +3,7 @@
  * 没有资料依据的数据一律不写（留空 = 粗波浪线）；为演示筛选而造的差异用确定性公式，并注明是示意。
  */
 import {
+  accordion,
   action,
   badges,
   brand,
@@ -13,11 +14,17 @@ import {
   count,
   defineSketch,
   defType,
+  distinct,
+  each,
   f,
   facts,
   filters,
   form,
   gallery,
+  manyOf,
+  min,
+  oneOf,
+  pair,
   image,
   nav,
   records,
@@ -25,7 +32,9 @@ import {
   section,
   span,
   steps,
+  tabs,
   text,
+  when,
   vocab,
 } from "sketch-wireframe";
 
@@ -60,6 +69,7 @@ const items = (c: string, codes: string[], start: number) =>
       certs: ["iso9001", ...(n % 2 === 0 ? ["fsc"] : []), ...(n % 5 === 0 ? ["reach"] : [])],
       photos: [],
       related: [codes[(i + 1) % codes.length]!], // 同类里的下一个：演示 ref（相关型号）
+      moq: 100 * ((n % 5) + 1), // 示意：让 fold（最低起订量）有数可算
       status: "上架",
       specs: ["尺寸", "重量", "包装"].map((key, k) => ({ row_id: `r${k + 1}`, key, value: "" })), // 没填 = 波浪线
     };
@@ -74,6 +84,7 @@ const product = defType("型号", {
     materials: f.term("材质", "material", { multiple: true }),
     certs: f.term("认证", "cert", { multiple: true, detail: false }),
     related: f.ref("相关型号", "product", { multiple: true }),
+    moq: f.number("起订量（示意）"),
     specs: f.list("技术参数", { key: "参数名", value: "参数值" }, { kv: true }),
     photos: f.media("型号图片"),
     // 运营用的上架状态：只给后台（internal），客户页面和公开表单里都没有它
@@ -86,6 +97,29 @@ const product = defType("型号", {
     ...items("folders", ["F01", "F02", "F03"], 9),
     ...items("desk", ["D7", "D8", "D9", "D10"], 12),
   ],
+});
+
+// 文章：正文是一棵树（blocks 字段）——和页面同一套语法写成数据，详情页用 embed 渲染它。内容是示意。
+const article = defType("文章", {
+  key: "slug",
+  title: "title",
+  fields: {
+    slug: f.text("地址名"),
+    title: f.text("标题", { table: true }),
+    body: f.blocks("正文"),
+  },
+  seed: ["a1", "a2", "a3", "a4"].map((slug, i) => ({
+    slug,
+    title: `示意文章 ${i + 1}`,
+    body: JSON.parse(
+      JSON.stringify([
+        text(2, "这一段是小标题"),
+        text(3),
+        i % 2 === 0 ? image() : steps(text(3, "第一步"), text(3, "第二步"), text(3, "第三步")),
+        text(3),
+      ]),
+    ),
+  })),
 });
 
 // 询盘：访客填写、我们收到——公开的“新增”表单，也是模型视图里的一张表
@@ -105,12 +139,24 @@ const inquiry = defType("获取报价", {
 export default defineSketch({
   code: "EX-CATALOG",
   title: "范例 · 文具目录站",
-  model: { category, material, cert, product, inquiry },
+  // 会话级参数：“谁在看”。切换后一直生效（换页不丢），也能写在地址里（?viewer=member）。不是认证，只表达“不同的人看到不同的结构”
+  session: { viewer: oneOf(["visitor", "member"]) },
+  model: { category, material, cert, product, article, inquiry },
 
   header: row(
     brand("示例文具"),
-    nav("/", "/category", "/product", "/compare", "/inquiry"),
-    action("获取报价", "/inquiry"),
+    nav("/", "/category", "/product", "/article", "/compare", "/inquiry"),
+    row(
+      when(
+        "viewer=visitor",
+        action("会员登录", undefined, { ghost: true, set: { viewer: "member" } }),
+      ),
+      when(
+        "viewer=member",
+        action("退出登录", undefined, { ghost: true, set: { viewer: "visitor" } }),
+      ),
+      action("获取报价", "/inquiry"),
+    ),
   ),
   footer: row(text(3, "联系方式"), text(3, "版权")),
 
@@ -132,6 +178,19 @@ export default defineSketch({
         ),
         section("产品分类入口", collection("category", { limit: 8 })),
         section("热门型号", collection("product", { limit: 4 })),
+        // distinct：一个字段出现过的各个值，每项自带“有这个值的记录数”——分组统计
+        section(
+          "各分类型号数",
+          each(
+            distinct("product", "category"),
+            pair(text(3, bind("o.label")), text(3, bind("o.count"))),
+            {
+              as: "o",
+              dir: "col",
+              rule: true,
+            },
+          ),
+        ),
         // 有顺序的流程：序号和连接线由引擎画，这里只声明“顺序有意义”
         section(
           "下单流程",
@@ -144,7 +203,17 @@ export default defineSketch({
     "/category/:id": {
       ctx: { type: "product", many: true, where: { category: ":id" } },
       body: [
-        section("概览", text(2, count(records("product", { where: { category: ":id" } })))),
+        // fold：对一个来源折叠出一个值。没有数据时画波浪线，不编
+        section(
+          "概览",
+          row(
+            text(2, count(records("product", { where: { category: ":id" } }))),
+            pair(
+              text(3, "最低起订量"),
+              text(3, min(records("product", { where: { category: ":id" } }), "moq")),
+            ),
+          ),
+        ),
         section(
           "产品",
           row(
@@ -185,11 +254,18 @@ export default defineSketch({
 
     "/product/:id": {
       ctx: { type: "product" },
+      // 标签页的状态就是地址里的 ?tab=…：每个标签都能被分享、被验证器逐个点到
+      state: { tab: oneOf(["specs", "related"]) },
       body: [
         section("图库", gallery("photos")),
         section("基本信息", text(1, bind("code")), facts({ only: ["category", "materials"] })),
-        section("技术参数", facts({ only: ["specs"] })),
-        section("相关型号", facts({ only: ["related"] })),
+        section(
+          "详情",
+          tabs("tab", [
+            ["specs", "技术参数", facts({ only: ["specs"] })],
+            ["related", "相关型号", facts({ only: ["related"] })],
+          ]),
+        ),
         // with：把当前型号带去报价表单——表单里“意向型号”已经选好
         section(
           "认证与报价",
@@ -198,6 +274,8 @@ export default defineSketch({
             action("为这款获取报价", "/inquiry", { with: { product: bind("code") } }),
           ),
         ),
+        // 只有会员看得到的一块：条件出现，条件是会话参数
+        when("viewer=member", section("会员资料", text(3), text(3))),
         section(
           "同类型号",
           collection("product", { where: { category: "$category" }, notSelf: true, limit: 4 }),
@@ -208,7 +286,18 @@ export default defineSketch({
     "/inquiry": {
       name: "获取报价",
       ctx: { type: "inquiry", create: true },
-      body: [section("表单", form())],
+      // 手风琴：多选参数，点标题展开/收起各自那一条
+      state: { faq: manyOf(["lead", "pack"]) },
+      body: [
+        section(
+          "常见问题",
+          accordion("faq", [
+            ["lead", "交期多久？", text(3)],
+            ["pack", "怎么包装？", text(3)],
+          ]),
+        ),
+        section("表单", form()),
+      ],
     },
   },
 });

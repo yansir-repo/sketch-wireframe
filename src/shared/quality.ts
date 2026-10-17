@@ -5,8 +5,9 @@
  * 引擎怎么渲染是引擎的事；这里只读 Sketch（连同每个节点处的环境），纯函数。
  */
 import { pagesOf } from "./derive.ts";
+import { factFields } from "./facts.ts";
 import type { Node, Sketch } from "./schema.ts";
-import { pageScope, resolveStatic, walkTree, withVar, type Scope } from "./scope.ts";
+import { pageScope, resolveStatic, scopeOfPage, walkTree, withVar, type Scope } from "./scope.ts";
 import { matchesWhere } from "./where.ts";
 
 const MAX_NAV = 7;
@@ -24,10 +25,10 @@ const textsOf = (s: Sketch): string[] => {
   };
   for (const p of Object.values(pagesOf(s))) {
     if (p.name) out.push(p.name);
-    for (const b of p.body) walkTree(s, b, pageScope(undefined), "", grab);
+    for (const b of p.body) walkTree(s, b, scopeOfPage(p, s.session), "", grab);
   }
-  walkTree(s, s.header, pageScope(undefined), "", grab);
-  walkTree(s, s.footer, pageScope(undefined), "", grab);
+  walkTree(s, s.header, pageScope(undefined, { state: s.session }), "", grab);
+  walkTree(s, s.footer, pageScope(undefined, { state: s.session }), "", grab);
   return out;
 };
 
@@ -55,63 +56,50 @@ export const qualityWarnings = (s: Sketch): string[] => {
       if (def) mark(t.type, def.title ?? def.key);
     }
   };
-  const visitShown =
-    (listType: string | undefined) =>
-    (n: Node, scope: Scope): void => {
-      if ("group" in n) return;
-      if ("each" in n) {
-        const src = n.each;
-        if ("fields" in src) {
-          const v = scope.vars.get(src.fields.of ?? scope.it ?? "");
-          const type = src.fields.type ?? (v?.kind === "record" ? v.type : undefined);
-          for (const name of type ? (resolveNames(type, src) ?? []) : []) mark(type, name);
-        }
-        if ("items" in src) markBind(src.items, scope);
-        return;
+  const visitShown = (n: Node, scope: Scope): void => {
+    if ("group" in n) return;
+    if ("each" in n) {
+      const src = n.each;
+      if ("fields" in src) {
+        const v = scope.vars.get(src.fields.of ?? scope.it ?? "");
+        const type = src.fields.type ?? (v?.kind === "record" ? v.type : undefined);
+        for (const name of type ? (resolveNames(type, src) ?? []) : []) mark(type, name);
       }
-      const fillBind = (f: unknown) => {
-        if (f && typeof f === "object" && "bind" in f)
-          markBind((f as { bind: string }).bind, scope);
-      };
-      if (n.slot === "text" || n.slot === "image" || n.slot === "action" || n.slot === "brand")
-        fillBind(n.fill);
-      if (n.slot === "action") for (const v of Object.values(n.with ?? {})) fillBind(v);
-      if (n.slot === "filters") {
+      if ("items" in src) markBind(src.items, scope);
+      if ("distinct" in src) mark(src.distinct.type, src.distinct.field);
+      if ("facets" in src) {
         const page = scope.vars.get("page");
-        const type = listType ?? (page?.kind === "record" ? page.type : undefined);
-        for (const f of n.fields) mark(type, f);
+        const type = scope.listType ?? (page?.kind === "record" ? page.type : undefined);
+        for (const f of src.facets) mark(type, f);
+      }
+      return;
+    }
+    const fillBind = (f: unknown) => {
+      if (f && typeof f === "object" && "bind" in f) markBind((f as { bind: string }).bind, scope);
+      // fold 折叠出来的数字也是“展示了”这个字段
+      if (f && typeof f === "object" && "fold" in f) {
+        const { of, field } = (f as { fold: { of: { records?: string }; field?: string } }).fold;
+        if (of.records && field) mark(of.records, field);
       }
     };
+    if (
+      n.slot === "text" ||
+      n.slot === "image" ||
+      n.slot === "action" ||
+      n.slot === "brand" ||
+      n.slot === "embed"
+    )
+      fillBind(n.fill);
+    if (n.slot === "action") for (const v of Object.values(n.with ?? {})) fillBind(v);
+  };
   const resolveNames = (
     type: string,
     src: { fields: { only?: ReadonlyArray<string>; skip?: ReadonlyArray<string> } },
-  ) => {
-    const def = s.model[type];
-    if (!def) return undefined;
-    const title = def.title ?? def.key;
-    if (src.fields.only)
-      return src.fields.only.filter(
-        (n) => def.fields[n] && def.fields[n]!.internal !== true && def.fields[n]!.kind !== "media",
-      );
-    return Object.entries(def.fields)
-      .filter(
-        ([n, fd]) =>
-          n !== def.key &&
-          n !== title &&
-          fd.kind !== "media" &&
-          fd.detail !== false &&
-          fd.internal !== true &&
-          !(src.fields.skip ?? []).includes(n),
-      )
-      .map(([n]) => n);
-  };
+  ) => factFields(s, type, src.fields);
 
   for (const [pattern, page] of Object.entries(pages)) {
-    const c = page.ctx;
-    const recordType = c && !c.many && !c.create ? c.type : undefined;
-    const listType = c?.many ? c.type : undefined;
     page.body.forEach((b, i) =>
-      walkTree(s, b, pageScope(recordType), `pages["${pattern}"].body[${i}]`, visitShown(listType)),
+      walkTree(s, b, scopeOfPage(page, s.session), `pages["${pattern}"].body[${i}]`, visitShown),
     );
   }
   for (const [t, def] of Object.entries(s.model)) {
@@ -119,9 +107,9 @@ export const qualityWarnings = (s: Sketch): string[] => {
       walkTree(
         s,
         def.card,
-        withVar({ vars: new Map(), it: undefined }, "it", { kind: "record", type: t }),
+        withVar(pageScope(undefined, { state: s.session }), "it", { kind: "record", type: t }),
         `model.${t}.card`,
-        visitShown(undefined),
+        visitShown,
       );
     // 列表里的集合卡片（没写 card 时是 图 + 显示名）也算展示了显示名；主键在地址里
     mark(t, def.title ?? def.key);
@@ -184,7 +172,7 @@ export const qualityWarnings = (s: Sketch): string[] => {
     if (!type) continue;
     const seen = new Map<string, string>();
     page.body.forEach((b, i) =>
-      walkTree(s, b, pageScope(type), `${at}.body[${i}]`, (n, scope, where) => {
+      walkTree(s, b, scopeOfPage(page, s.session), `${at}.body[${i}]`, (n, scope, where) => {
         if ("group" in n || !("each" in n)) return;
         const src = n.each;
         // 同一页里两个 fields 显示完全一样的字段 = 重复板块
@@ -232,13 +220,19 @@ export const qualityWarnings = (s: Sketch): string[] => {
   }
 
   // ---- 页眉 ----
-  walkTree(s, s.header, pageScope(undefined), "header", (n, _scope, where) => {
-    if (!("group" in n) && !("each" in n) && n.slot === "nav" && n.paths.length > MAX_NAV)
-      warn(
-        where,
-        `导航有 ${n.paths.length} 项（>${MAX_NAV}）：引擎会把它收进菜单，但这说明信息架构该合并或分组了`,
-      );
-  });
+  walkTree(
+    s,
+    s.header,
+    pageScope(undefined, { state: s.session }),
+    "header",
+    (n, _scope, where) => {
+      if (!("group" in n) && !("each" in n) && n.slot === "nav" && n.paths.length > MAX_NAV)
+        warn(
+          where,
+          `导航有 ${n.paths.length} 项（>${MAX_NAV}）：引擎会把它收进菜单，但这说明信息架构该合并或分组了`,
+        );
+    },
+  );
   const firstLeaf = (n: Node): Node => ("group" in n && n.group[0] ? firstLeaf(n.group[0]) : n);
   const lead = firstLeaf(s.header);
   if (!("group" in lead) && !("each" in lead) && lead.slot === "action" && lead.to === "/")

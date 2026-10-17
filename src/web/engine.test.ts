@@ -7,23 +7,33 @@ import { applySel, facetsOf, parseQuery, toQuery, toggled } from "./facets.ts";
 import { renderForm } from "./fields.ts";
 import { node, type RC, type RVar } from "./nodes.ts";
 import {
+  accordion,
   action,
   badges,
   bind,
   collection,
   compare,
   count,
+  distinct,
   each,
+  embed,
   facts,
   fields,
+  filters,
   gallery,
   image,
   items,
+  max,
+  min,
   nav,
   records,
   row,
   steps,
+  sum,
+  avg,
+  tabs,
   text,
+  when,
 } from "../shared/dsl.ts";
 
 const memory = (): Store & { data: Map<string, string> } => {
@@ -153,6 +163,7 @@ const rcOf = (
   s: Sketch,
   o: {
     fid?: "lines" | "words";
+    state?: RC["state"];
     page?: { type: string; row: Record<string, unknown> };
     params?: Record<string, string>;
     sel?: Record<string, string[]>;
@@ -165,6 +176,7 @@ const rcOf = (
   fid: o.fid ?? "words",
   pages: pagesOf(s),
   params: o.params ?? {},
+  state: o.state ?? {},
   vars: new Map<string, RVar>(
     o.page ? [["page", { kind: "record", type: o.page.type, row: o.page.row }]] : [],
   ),
@@ -273,8 +285,13 @@ describe("every node renders exactly one root element", () => {
     ],
     [
       "filters",
-      { slot: "filters", fields: ["category", "materials"] },
+      filters("category", "materials"),
       (f) => rcOf(example, { fid: f, listType: "product" }),
+    ],
+    [
+      "filters (selected)",
+      filters("category", "materials"),
+      (f) => rcOf(example, { fid: f, listType: "product", sel: { materials: ["metal"] } }),
     ],
     ["form", { slot: "form" }, (f) => rcOf(example, { fid: f, createType: "inquiry" })],
   ];
@@ -448,5 +465,269 @@ describe("the generator (each) and the environment", () => {
       rcOf(example),
     );
     expect(html).toContain("材质");
+  });
+});
+
+describe("filters = links that edit state (each over facets × options)", () => {
+  const list = (sel: Record<string, string[]> = {}, fid: "words" | "lines" = "words") =>
+    node(filters("category", "materials"), rcOf(example, { listType: "product", sel, fid }));
+
+  it("every option is a link to the same page with that parameter toggled; the clear link appears only with a selection", () => {
+    const none = list();
+    expect(none).toContain('href="#/?materials=metal"');
+    expect(none).not.toContain("clear");
+    const some = list({ materials: ["metal"] });
+    expect(some).toContain('href="#/"'); // 取消 metal = 回到没有参数的地址
+    expect(some).toContain('href="#/?materials=metal,paper"');
+    expect(some).toContain("清除筛选");
+  });
+
+  it("the selected option is marked on, an option that would leave nothing is dimmed", () => {
+    const rc0 = rcOf(example, { listType: "product" });
+    const sel = { category: ["pens"] };
+    const facets = facetsOf(
+      example,
+      rc0.db,
+      "product",
+      ["category", "materials"],
+      rc0.db.list("product"),
+      sel,
+    );
+    const zero = facets.flatMap((f) => f.options).some((o) => o.count === 0 && !o.on);
+    const html = list(sel);
+    expect(html).toMatch(/opt on/);
+    if (zero) expect(html).toMatch(/opt dim/);
+    // 构造一个一定有“没得选”的：选一个词表条目，再看别的类目
+    const cats = facets.find((f) => f.field === "category")!.options.filter((o) => !o.on);
+    expect(cats.length).toBeGreaterThan(0);
+  });
+
+  it("counts are the same facet semantics as before: what choosing the option would leave", () => {
+    const rc = rcOf(example, { listType: "product", sel: { category: ["pens"] } });
+    const html = node(filters("category", "materials"), rc);
+    const expected = rc.db
+      .list("product")
+      .filter(
+        (r) => r["category"] === "pens" && (r["materials"] as string[]).includes("metal"),
+      ).length;
+    const metal = html.slice(html.indexOf("materials=metal") - 200);
+    expect(metal).toContain(`>${expected}<`);
+  });
+
+  it("the clear label is the engine's, in the sketch's language; lines fidelity draws option names as scribbles", () => {
+    const en: Sketch = { ...JSON.parse(JSON.stringify(example)), locale: "en" };
+    expect(
+      node(filters("materials"), rcOf(en, { listType: "product", sel: { materials: ["metal"] } })),
+    ).toContain("Clear filters");
+    expect(list({}, "lines")).not.toContain("data-copy");
+  });
+
+  it("other parameters in the address are carried along when an option is toggled", () => {
+    const html = node(
+      filters("materials"),
+      rcOf(example, {
+        listType: "product",
+        sel: { tab: ["specs"] },
+        state: { tab: { values: ["a", "specs"] } },
+      }),
+    );
+    expect(html).toContain("tab=specs&amp;materials=metal");
+  });
+});
+
+describe("state (param + when)", () => {
+  const state = {
+    tab: { values: ["overview", "specs"], default: "overview" },
+    faq: { values: ["a", "b"], multi: true },
+  };
+  const page = (sel: Record<string, string[]> = {}) => rcOf(example, { state, sel });
+
+  it("when shows a node only while the parameter has the value; a single parameter falls back to its default", () => {
+    const n = when("tab=specs", text(2, "SPECS"));
+    expect(node(n, page())).toBe("");
+    expect(node(n, page({ tab: ["specs"] }))).toContain("SPECS");
+    expect(node(when("tab=overview", text(2, "OVER")), page())).toContain("OVER");
+  });
+
+  it("when without a value means 'has any value'; a|b means any of those parameters", () => {
+    expect(node(when("faq", text(2, "X")), page())).toBe("");
+    expect(node(when("faq", text(2, "X")), page({ faq: ["a"] }))).toContain("X");
+    expect(node(when("tab|faq", text(2, "Y")), page())).toContain("Y"); // tab 有默认值
+  });
+
+  it("tabs: the header for the current tab is filled, the others are ghosts; headers set the parameter", () => {
+    const html = node(
+      tabs("tab", [
+        ["overview", "概述", text(3, "O")],
+        ["specs", "参数", text(3, "S")],
+      ]),
+      page({ tab: ["specs"] }),
+    );
+    expect(html).toContain("S");
+    expect(html).not.toContain(">O<");
+    expect(html).toMatch(/class="btn on"[^>]*href="#\/\?tab=specs"|href="#\/"[^>]*>/); // 点 overview 回到默认（地址里没有参数）
+    expect(html.match(/class="btn ghost"/g)?.length).toBe(1);
+  });
+
+  it("accordion: multi-valued, each title toggles its own entry", () => {
+    const rc = page({ faq: ["a"] });
+    const html = node(
+      accordion("faq", [
+        ["a", "Q1", text(3, "ANS1")],
+        ["b", "Q2", text(3, "ANS2")],
+      ]),
+      rc,
+    );
+    expect(html).toContain("ANS1");
+    expect(html).not.toContain("ANS2");
+    expect(html).toContain('href="#/?faq=a,b"'); // 展开 b，a 保持
+    expect(html).toContain('href="#/"'); // 收起 a
+  });
+
+  it("a state parameter is not mistaken for a field filter: records with ?tab= in the address are not filtered away", () => {
+    const rc = rcOf(example, { listType: "product", state, sel: { tab: ["specs"] } });
+    expect(node(collection("product", { limit: 2 }), rc)).toContain("P101");
+  });
+
+  it("param source yields one item per declared value, marked on when current", () => {
+    const html = node(
+      each({ param: "tab" }, text(3, bind("t.value")), { as: "t", dir: "row" }),
+      page({ tab: ["specs"] }),
+    );
+    expect(html).toContain("overview");
+    expect(html).toContain("specs");
+  });
+});
+
+describe("fold (count / sum / min / max / avg) and distinct", () => {
+  const rc = () => rcOf(example);
+  const moqs = (cat: string) =>
+    rc()
+      .db.list("product")
+      .filter((r) => r["category"] === cat)
+      .map((r) => Number(r["moq"]));
+  const src = records("product", { where: { category: "pens" } });
+  const shownText = (n: ReturnType<typeof text>) => node(n, rc());
+
+  it("computes each op over a numeric field of the records", () => {
+    const v = moqs("pens");
+    expect(shownText(text(2, sum(src, "moq")))).toContain(`>${v.reduce((a, b) => a + b, 0)}<`);
+    expect(shownText(text(2, min(src, "moq")))).toContain(`>${Math.min(...v)}<`);
+    expect(shownText(text(2, max(src, "moq")))).toContain(`>${Math.max(...v)}<`);
+    expect(shownText(text(2, avg(src, "moq")))).toContain(
+      `>${v.reduce((a, b) => a + b, 0) / v.length}<`,
+    );
+    expect(shownText(text(2, count(src)))).toContain(`>${v.length}<`);
+  });
+
+  it("count of nothing is 0; sum/min/max/avg of nothing is a scribble (never invented)", () => {
+    const none = records("product", { where: { category: "nope" } });
+    expect(shownText(text(2, count(none)))).toContain(">0<");
+    for (const op of [sum, min, max, avg]) {
+      const html = shownText(text(2, op(none, "moq")));
+      expect(html).toContain('data-rough="sq"');
+      expect(html).not.toContain("data-copy");
+    }
+  });
+
+  it("distinct yields each value that occurs with the number of records having it (group-by)", () => {
+    const html = node(
+      each(
+        distinct("product", "category"),
+        row(text(3, bind("o.label")), text(3, bind("o.count"))),
+        { as: "o", dir: "col" },
+      ),
+      rc(),
+    );
+    expect(html).toContain("笔类");
+    expect(html).toContain(">5<");
+  });
+
+  it("distinct expands a multi-valued field value by value", () => {
+    const html = node(
+      each(distinct("product", "materials"), text(3, bind("o.label")), { as: "o", dir: "row" }),
+      rc(),
+    );
+    for (const m of ["塑料", "金属", "纸", "竹"]) expect(html).toContain(m);
+  });
+
+  it("a where can take its value from the item of an outer each: sum per group", () => {
+    const html = node(
+      each(
+        distinct("product", "category"),
+        row(
+          text(3, bind("o.value")),
+          text(3, sum(records("product", { where: { category: "{o.value}" } }), "moq")),
+        ),
+        { as: "o", dir: "col" },
+      ),
+      rc(),
+    );
+    expect(html).toContain(`>${moqs("pens").reduce((a, b) => a + b, 0)}<`);
+  });
+});
+
+describe("embed (a field whose value is a tree)", () => {
+  const art = (body: unknown) =>
+    rcOf(example, { page: { type: "article", row: { slug: "x", title: "T", body } } });
+  it("renders the tree stored in a blocks field, with the same grammar as a page; one root", () => {
+    const body = JSON.parse(JSON.stringify([text(2, "HEAD"), steps(text(3, "s1"), text(3, "s2"))]));
+    const html = node(embed(bind("body")), art(body));
+    expect(rootCount(html)).toBe(1);
+    expect(html).toContain("HEAD");
+    expect(html.match(/class="stepno"/g)?.length).toBe(2);
+  });
+
+  it("an embed inside an embedded tree renders nothing (termination is guaranteed, not hoped for)", () => {
+    const body = JSON.parse(JSON.stringify([text(2, "OUTER"), embed(bind("body"))]));
+    const html = node(embed(bind("body")), art(body));
+    expect(html).toContain("OUTER");
+    expect(html.match(/class="embed"/g)?.length).toBe(1);
+  });
+
+  it("an empty or missing tree is an empty embed, not a crash; lines fidelity leaks no copy", () => {
+    expect(node(embed(bind("body")), art([]))).toContain('class="embed"');
+    const lines = rcOf(example, {
+      fid: "lines",
+      page: {
+        type: "article",
+        row: { slug: "x", title: "T", body: JSON.parse(JSON.stringify([text(2, "HEAD")])) },
+      },
+    });
+    expect(node(embed(bind("body")), lines)).not.toContain("data-copy");
+  });
+
+  it("the default detail page of a type with a blocks field renders its body", () => {
+    const rc = art(JSON.parse(JSON.stringify([text(2, "BODYTEXT")])));
+    const page = pagesOf(example)["/article/:id"]!;
+    expect(page.body.map((n) => node(n, rc)).join("")).toContain("BODYTEXT");
+  });
+});
+
+describe("session parameters (who is looking)", () => {
+  const session = { viewer: { values: ["visitor", "member"], default: "visitor" } };
+  const sk: Sketch = { ...JSON.parse(JSON.stringify(example)), session };
+  const rc = (
+    o: { sel?: Record<string, string[]>; stored?: Record<string, string[]> } = {},
+  ): RC => ({
+    ...rcOf(sk, { state: session, sel: o.sel ?? {} }),
+    ...(o.stored ? { stored: o.stored } : {}),
+  });
+
+  it("falls back to the default, then to what the browser kept, and the address wins over both", () => {
+    const only = when("viewer=member", text(3, "SECRET"));
+    expect(node(only, rc())).toBe("");
+    expect(node(only, rc({ stored: { viewer: ["member"] } }))).toContain("SECRET");
+    expect(node(only, rc({ stored: { viewer: ["member"] }, sel: { viewer: ["visitor"] } }))).toBe(
+      "",
+    );
+  });
+
+  it("a link that sets a session parameter always writes it into the address (default included), so a kept value cannot override it", () => {
+    const html = node(
+      action("out", undefined, { set: { viewer: "visitor" } }),
+      rc({ stored: { viewer: ["member"] } }),
+    );
+    expect(html).toContain("viewer=visitor");
   });
 });
