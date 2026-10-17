@@ -4,6 +4,7 @@
  * 节点树里每一处都带着它那里的环境（scope.ts）：模板里的变量是什么、bind 路径指向哪个字段，都在这里被检查。
  */
 import { matchRoute, pagesOf } from "./derive.ts";
+import { parseOrder, searchFields, sortable } from "./facts.ts";
 import { parseNodes } from "./parse.ts";
 import { qualityWarnings } from "./quality.ts";
 import {
@@ -14,6 +15,8 @@ import {
   type Field,
   type Fill,
   type Node,
+  type ParamDecl,
+  type RecordsSource,
   type Sketch,
   type Source,
 } from "./schema.ts";
@@ -63,10 +66,56 @@ export const validate = (s: Sketch): Report => {
       err(at, `字段 "${r.target.field}" 是 internal（只给后台），不能出现在客户页面上`);
   };
 
+  /** 一个自由文本参数（搜索词、页码）：要在这个页面（或会话）里声明成 free。 */
+  const freeParam = (param: string, env: Env, at: string, what: string) => {
+    const d = env.state[param];
+    if (!d) err(at, `${what} 的参数 ${param} 没有在这个页面的 state 里声明（要 free()）`);
+    else if (!d.free) err(at, `${what} 的参数 ${param} 要声明成 free()（它的取值不是有限集合）`);
+  };
+
+  /** 排序依据：字段要存在、有大小可比；写成参数时，参数的每个取值都得是这样的字段。 */
+  const checkOrder = (
+    type: string,
+    order: NonNullable<RecordsSource["order"]>,
+    env: Env,
+    at: string,
+  ) => {
+    const field = (o: string, where: string) => {
+      const { field: f } = parseOrder(o);
+      if (!fieldOf(type, f)) err(at, `${where}的字段 ${f} 不在类型 ${type} 里`);
+      else if (!sortable(s, type, f))
+        err(at, `${where}的字段 ${f} 不能排序（图片/列表/内容树没有大小）`);
+    };
+    if (typeof order === "string") return field(order, "order ");
+    const d = env.state[order.param];
+    if (!d) return err(at, `order 的参数 ${order.param} 没有在这个页面的 state 里声明`);
+    if (d.free || d.multi)
+      return err(at, `order 的参数 ${order.param} 要是有限取值的单选（每个取值是一种排序）`);
+    for (const v of d.values) field(v, `order 参数 ${order.param} 的取值 ${v}：`);
+  };
+
+  const checkRecords = (src: RecordsSource, env: Env, at: string) => {
+    if (src.order !== undefined) checkOrder(src.records, src.order, env, at);
+    if (src.search) {
+      freeParam(src.search.param, env, at, "search");
+      if (searchFields(s, src.records).length === 0)
+        err(at, `search：类型 ${src.records} 没有能搜的字段`);
+    }
+    if (src.page) {
+      freeParam(src.page.param, env, at, "page");
+      if (src.limit === undefined) err(at, "page 要和 limit 一起写（limit 就是每页几条）");
+    }
+  };
+
   const checkSource = (src: Source, env: Env, ctx: PageCtx, at: string) => {
     const b = bindSource(s, env, src);
     if (!b.ok) return err(at, b.error);
+    if ("pages" in src) {
+      if (!src.pages.page) err(at, "pages 要指向一个写了 page 的 records 来源");
+      checkSource(src.pages, env, ctx, at);
+    }
     if ("records" in src) {
+      checkRecords(src, env, at);
       for (const [fld, v] of Object.entries(src.where ?? {})) {
         if (!fieldOf(src.records, fld)) err(at, `where 里的字段 ${fld} 不在类型 ${src.records} 里`);
         if (v.startsWith("$")) {
@@ -123,7 +172,7 @@ export const validate = (s: Sketch): Report => {
     if ("bind" in fill) checkBind(fill.bind, env, at);
     else {
       const { op, of, field } = fill.fold;
-      if ("fields" in of || "facets" in of || "options" in of || "param" in of)
+      if ("fields" in of || "facets" in of || "options" in of || "param" in of || "pages" in of)
         err(at, "fold 只能折叠 records / items / distinct");
       else checkSource(of, env, ctx, at);
       if (op === "count") {
@@ -152,7 +201,12 @@ export const validate = (s: Sketch): Report => {
     const names = typeof w.param === "string" ? [w.param] : [...w.param];
     for (const p of names) {
       if (!paramKnown(p, env)) err(at, `when 的参数 ${p} 没有在这个页面的 state 里声明`);
-      else if (w.is !== undefined && env.state[p] && !env.state[p]!.values.includes(w.is))
+      else if (
+        w.is !== undefined &&
+        env.state[p] &&
+        !env.state[p]!.free &&
+        !env.state[p]!.values.includes(w.is)
+      )
         err(at, `when 的 ${p}=${w.is}：${p} 的取值只有 ${env.state[p]!.values.join("、")}`);
     }
   };
@@ -173,6 +227,7 @@ export const validate = (s: Sketch): Report => {
         typeof v === "string" &&
         v !== "" &&
         env.state[k] &&
+        !env.state[k]!.free &&
         !env.state[k]!.values.includes(v)
       )
         err(at, `set 的 ${k}=${v}：${k} 的取值只有 ${env.state[k]!.values.join("、")}`);
@@ -285,6 +340,10 @@ export const validate = (s: Sketch): Report => {
       case "form":
         if (!ctx.create) err(at, "form 只能在“新增某类型”的页面里用");
         break;
+      case "search":
+        freeParam(n.param, env, at, "search");
+        checkFill(n.fill, env, ctx, at);
+        break;
       case "embed": {
         if (!n.fill || typeof n.fill !== "object" || !("bind" in n.fill)) {
           err(at, 'embed 要绑一个 blocks 字段：embed(bind("body"))');
@@ -306,7 +365,7 @@ export const validate = (s: Sketch): Report => {
     const parsed = parseNodes(value);
     if (!parsed.ok) return err(at, `blocks 的值不是合法的节点树：${parsed.error}`);
     const scope = withVar(pageScope(type), "it", { kind: "record", type });
-    const shell = new Set(["embed", "form", "nav", "brand"]);
+    const shell = new Set(["embed", "form", "nav", "brand", "search"]);
     const walk = (n: Node, where: string) => {
       if ("group" in n) n.group.forEach((c, i) => walk(c, `${where}.group[${i}]`));
       else if ("each" in n) {
@@ -397,12 +456,21 @@ export const validate = (s: Sketch): Report => {
 
   checkModel();
 
+  /** 一个参数的声明：有限取值的要有取值；free 的不能有取值和 multi（它什么字符串都行），可以有 default（页码从 1 起）。 */
+  const checkDecl = (decl: ParamDecl, at: string) => {
+    if (decl.free) {
+      if (decl.values.length || decl.multi) err(at, "free 参数不写 values / multi");
+      return;
+    }
+    if (!decl.values.length) err(at, "取值不能为空");
+    if (decl.default !== undefined && !decl.values.includes(decl.default))
+      err(at, `default ${decl.default} 不在 values 里`);
+    if (decl.multi && decl.default !== undefined) err(at, "多选参数没有 default");
+  };
+
   for (const [pname, decl] of Object.entries(s.session ?? {})) {
     if (!PARAM_RE.test(pname)) err("session", `参数名只能用字母数字下划线横线：${pname}`);
-    if (!decl.values.length) err(`session.${pname}`, "取值不能为空");
-    if (decl.default !== undefined && !decl.values.includes(decl.default))
-      err(`session.${pname}`, `default ${decl.default} 不在 values 里`);
-    if (decl.multi && decl.default !== undefined) err(`session.${pname}`, "多选参数没有 default");
+    checkDecl(decl, `session.${pname}`);
     for (const [route, page] of Object.entries(pages))
       if (page.state?.[pname]) err(`pages["${route}"].state.${pname}`, `和会话参数 ${pname} 重名`);
   }
@@ -416,11 +484,7 @@ export const validate = (s: Sketch): Report => {
     let env = pageScope(undefined, { state: { ...s.session, ...page.state } });
     for (const [pname, decl] of Object.entries(page.state ?? {})) {
       if (!PARAM_RE.test(pname)) err(`${at}.state`, `参数名只能用字母数字下划线横线：${pname}`);
-      if (!decl.values.length) err(`${at}.state.${pname}`, "取值不能为空");
-      if (decl.default !== undefined && !decl.values.includes(decl.default))
-        err(`${at}.state.${pname}`, `default ${decl.default} 不在 values 里`);
-      if (decl.multi && decl.default !== undefined)
-        err(`${at}.state.${pname}`, "多选参数没有 default");
+      checkDecl(decl, `${at}.state.${pname}`);
       const t = page.ctx?.type;
       if (t && s.model[t]?.fields[pname])
         err(

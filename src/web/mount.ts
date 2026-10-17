@@ -418,11 +418,12 @@ export const mount = (sketch: Sketch): void => {
       return;
     }
     if (input.matches?.("input[data-search]")) {
-      const parts = [
-        input.value.trim() ? `q=${encodeURIComponent(input.value.trim())}` : "",
-        input.dataset.keep ?? "",
-      ].filter(Boolean);
-      location.hash = input.dataset.base! + (parts.length ? "?" + parts.join("&") : "");
+      // data-base = 清掉这个参数后的地址（别的参数原样带着）；客户页的搜索框和后台表格的搜索框是同一个机制
+      const v = input.value.replace(/,/g, " ").trim();
+      const base = input.dataset.base!;
+      location.hash = v
+        ? `${base}${base.includes("?") ? "&" : "?"}${input.dataset.search}=${encodeURIComponent(v)}`
+        : base;
       return;
     }
     if (!input.matches?.("input[data-photo-input]")) return;
@@ -481,6 +482,15 @@ export const mount = (sketch: Sketch): void => {
   window.addEventListener("load", () => setTimeout(settle, 400));
 
   // ---- 给验证器的口子：每个路由模式给出真实可访问的路径 ----
+  // 自由文本参数没有有限的取值：抽样。参数的用途（搜索词还是页码）写在 records 里，不在名字里，所以两类样本都给：
+  // 这个列表第一条记录显示名里的一个词（搜索），和 "2"（页码；越界会停在最后一页，不会出错）
+  const freeSamples = (base: string): string[] => {
+    const hit = matchRoute(Object.keys(pages), base);
+    const type = hit ? pages[hit.pattern]?.ctx?.type : undefined;
+    const first = type ? db.list(type)[0] : undefined;
+    const word = first ? recordTitle(sketch, db, type!, first).split(/\s+/)[0] : "";
+    return [...(word ? [encodeURIComponent(word)] : []), "2"];
+  };
   const sampleRoutes = (): string[] => {
     const out: string[] = [];
     for (const [pattern, page] of Object.entries(pages)) {
@@ -507,7 +517,8 @@ export const mount = (sketch: Sketch): void => {
     for (const [pattern, page] of Object.entries(pages))
       for (const [name, decl] of Object.entries(page.state ?? {}))
         for (const base of out.filter((p) => !p.includes("?") && matchRoute([pattern], p)))
-          for (const v of decl.values) out.push(`${base}?${name}=${v}`);
+          for (const v of decl.free ? freeSamples(base) : decl.values)
+            out.push(`${base}?${name}=${v}`);
     // 会话级参数的每个取值也是一个可以直接打开的页面
     for (const [name, decl] of Object.entries(sketch.session ?? {}))
       for (const v of decl.values) out.push(`/?${name}=${v}`);

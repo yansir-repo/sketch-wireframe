@@ -935,3 +935,29 @@ dialog .actions {
   font-size: 12px;
   color: var(--pencil);
 }
+
+/* 搜索框（客户页的 search 叶子）：一个手绘框，没有提示字时叠一条波浪线 */
+.search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  min-width: 180px;
+}
+.search input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  width: 100%;
+  padding: 4px 0;
+}
+.search .sq {
+  position: absolute;
+  left: 12px;
+  pointer-events: none;
+}
+.search input:not(:placeholder-shown) ~ .sq {
+  display: none;
+}

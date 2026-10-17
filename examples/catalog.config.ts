@@ -20,6 +20,7 @@ import {
   facts,
   filters,
   form,
+  free,
   gallery,
   manyOf,
   min,
@@ -27,9 +28,12 @@ import {
   pair,
   image,
   nav,
+  pager,
   records,
   row,
+  search,
   section,
+  sortMenu,
   span,
   steps,
   tabs,
@@ -106,11 +110,13 @@ const article = defType("文章", {
   fields: {
     slug: f.text("地址名"),
     title: f.text("标题", { table: true }),
+    published: f.date("发布日期", { table: true }),
     body: f.blocks("正文"),
   },
   seed: ["a1", "a2", "a3", "a4"].map((slug, i) => ({
     slug,
     title: `示意文章 ${i + 1}`,
+    published: ["2026-03-02", "2026-01-15", "2026-05-20", "2026-02-08"][i]!, // 示意：让“最新在前”有顺序可看
     body: JSON.parse(
       JSON.stringify([
         text(2, "这一段是小标题"),
@@ -134,6 +140,14 @@ const inquiry = defType("获取报价", {
     notes: f.text("说明", { multiline: true }),
     contact: f.text("联系方式", { table: true }),
   },
+});
+
+// 型号列表：每页 6 条，按 sort 参数排，按 q 搜；页码读 page 参数
+const PRODUCT_LIST = records("product", {
+  limit: 6,
+  order: { param: "sort" },
+  search: { param: "q" },
+  page: { param: "page" },
 });
 
 export default defineSketch({
@@ -224,18 +238,42 @@ export default defineSketch({
       ],
     },
 
+    // 排序 / 搜索 / 分页：三者都是地址里的参数（?sort=-moq&q=P1&page=2），和筛选、标签页同一个机制；
+    // 每页 6 条，列表和页码写的是同一个 records 来源
     "/product": {
       name: "全部型号",
       ctx: { type: "product", many: true },
+      state: { sort: oneOf(["code", "-moq", "moq"]), q: free(), page: free("1") },
       body: [
         section(
           "产品",
           row(
             span(1, filters("category", "materials", "certs")),
-            span(3, collection("product", { limit: 60 })),
+            span(
+              3,
+              col(
+                row(
+                  search("q"),
+                  sortMenu("sort", [
+                    ["code", "型号"],
+                    ["-moq", "起订量从高到低"],
+                    ["moq", "起订量从低到高"],
+                  ]),
+                ),
+                each(PRODUCT_LIST, undefined, { dir: "grid" }),
+                pager(PRODUCT_LIST),
+              ),
+            ),
           ),
         ),
       ],
+    },
+
+    // 文章：最新在前（发布日期是 date 字段，order 写成 "-published"）
+    "/article": {
+      name: "文章",
+      ctx: { type: "article", many: true },
+      body: [section("文章", collection("article", { limit: 24, order: "-published" }))],
     },
 
     // 对比表：几个字段（行）× 几条记录（列）——两层 each，不是新的槽

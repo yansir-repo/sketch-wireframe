@@ -24,12 +24,23 @@ export const FORMAT_VERSION = 4;
 
 // ---- 来源（Each 逐项生成的那个关系）----
 
+/**
+ * records：一个类型的记录。除了 where（筛），还能排序、搜索、分页——三者都是“地址里的参数”（和筛选、标签页同一个机制），
+ * 所以每一种状态都是可分享、可回退的页面：
+ *   order  "-date" = 按 date 倒序（"name" = 正序）；{ param } = 由页面参数决定，参数的取值就是这种写法的字段名；
+ *   search { param } = 参数里的文字出现在这条记录的可显示字段里才留下；
+ *   page   { param } = 页码参数；每页多少条是 limit（分页必须写 limit）。
+ */
 const RecordsSource = Schema.Struct({
   records: Schema.String,
   where: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   limit: Schema.optionalKey(Schema.Number),
   notSelf: Schema.optionalKey(Schema.Boolean),
+  order: Schema.optionalKey(Schema.Union([Schema.String, Schema.Struct({ param: Schema.String })])),
+  search: Schema.optionalKey(Schema.Struct({ param: Schema.String })),
+  page: Schema.optionalKey(Schema.Struct({ param: Schema.String })),
 });
+export type RecordsSource = typeof RecordsSource.Type;
 const FieldsSource = Schema.Struct({
   fields: Schema.Struct({
     /** 取哪条记录的字段（变量名）；不写 = 当前记录。 */
@@ -51,8 +62,11 @@ const ParamSource = Schema.Struct({ param: Schema.String });
 const DistinctSource = Schema.Struct({
   distinct: Schema.Struct({ type: Schema.String, field: Schema.String }),
 });
+/** 一个分页的各页：每页一项，有 label / value（页码）/ on。写的是同一个 records 来源（分页的那个），页数由它筛出的条数和 limit 算。 */
+const PagesSource = Schema.Struct({ pages: RecordsSource });
 export const SourceSchema = Schema.Union([
   RecordsSource,
+  PagesSource,
   FieldsSource,
   ItemsSource,
   FacetsSource,
@@ -141,13 +155,32 @@ const nav = Schema.Struct({
 });
 const form = Schema.Struct({ slot: Schema.Literal("form"), ...common });
 /**
+ * 搜索框：唯一需要“输入”的控件。回车把输入的文字写进页面的一个自由文本参数（地址里 ?q=…），列表用 search 读它。
+ * fill = 框里的提示字（不写 = 波浪线）。
+ */
+const search = Schema.Struct({
+  slot: Schema.Literal("search"),
+  param: Schema.String,
+  fill: Fill,
+  ...common,
+});
+/**
  * 把一个 blocks 字段里存的那棵树渲染出来（文章正文）。树用同一套语法写，所以语言对“数据里存着语言的句子”是封闭的；
  * 为了一定能终止，被嵌进去的树里不能再有 embed / form / nav / brand（它们是页面的壳，不是内容）。
  */
 const embed = Schema.Struct({ slot: Schema.Literal("embed"), fill: Fill, ...common });
 
-export const SLOT_KINDS = ["text", "image", "action", "brand", "nav", "form", "embed"] as const;
-const Atom = Schema.Union([text, image, action, brand, nav, form, embed]);
+export const SLOT_KINDS = [
+  "text",
+  "image",
+  "action",
+  "brand",
+  "nav",
+  "form",
+  "embed",
+  "search",
+] as const;
+const Atom = Schema.Union([text, image, action, brand, nav, form, embed, search]);
 export type Atom = typeof Atom.Type;
 
 // ---- 节点（递归）----
@@ -231,6 +264,7 @@ export type Option = typeof Option.Type;
 export const FIELD_KINDS = [
   "text",
   "number",
+  "date",
   "bool",
   "choice",
   "term",
@@ -303,11 +337,15 @@ export const Ctx = Schema.NullOr(
 );
 export type Ctx = typeof Ctx.Type;
 
-/** 一个状态参数：取值是一个有限的集合（标签页的各个标签、手风琴的各个条目）；multi = 可以同时有几个（手风琴），否则单选。 */
+/**
+ * 一个状态参数：取值是一个有限的集合（标签页的各个标签、手风琴的各个条目）；multi = 可以同时有几个（手风琴），否则单选。
+ * free = 取值不是有限集合（搜索词、页码）：values 留空，什么字符串都行；验证器对它只抽样。
+ */
 export const ParamDecl = Schema.Struct({
   values: Schema.Array(Schema.String),
   multi: Schema.optionalKey(Schema.Boolean),
   default: Schema.optionalKey(Schema.String),
+  free: Schema.optionalKey(Schema.Boolean),
 });
 export type ParamDecl = typeof ParamDecl.Type;
 

@@ -243,6 +243,25 @@ export default async function flow({ page, go, sleep, check, load }) {
 
   // ---- 客户页筛选：并集/交集、地址即状态、清除 ----
   await go("#/product");
+  // 列表分了页：一个筛选结果一共有几个，要数页码再翻到最后一页数余数（翻完回到原地址）
+  const listed = async () => {
+    const here = await hash();
+    const links = () =>
+      ev(
+        () =>
+          [...document.querySelectorAll("a.btn")].filter((a) => /^\d+$/.test(a.textContent.trim()))
+            .length,
+      );
+    const pages = await links();
+    if (pages <= 1) return count(".grid .card");
+    const [path, qs = ""] = here.split("?");
+    const q = new URLSearchParams(qs);
+    q.set("page", String(pages));
+    await go(`${path}?${q}`);
+    const last = await count(".grid .card");
+    await go(here);
+    return (pages - 1) * 6 + last;
+  };
   const expected = (m, c) =>
     ev(
       ({ m, c }) =>
@@ -255,7 +274,7 @@ export default async function flow({ page, go, sleep, check, load }) {
           ).length,
       { m, c },
     );
-  const total = await count(".grid .card");
+  const total = await listed();
   check(
     "全部型号页：侧栏筛选和产品并排",
     await ev(() => {
@@ -266,7 +285,7 @@ export default async function flow({ page, go, sleep, check, load }) {
   );
   await page.click('.facet a.opt[href*="materials=metal"]');
   await sleep(300);
-  const metal = await count(".grid .card");
+  const metal = await listed();
   check(
     "筛选：选一个材质，只剩含它的型号",
     metal > 0 && metal < total && metal === (await expected(["metal"], [])),
@@ -275,7 +294,7 @@ export default async function flow({ page, go, sleep, check, load }) {
   check("筛选状态写进地址", (await hash()).includes("materials=metal"));
   await page.click('.facet a.opt[href*="metal,paper"]');
   await sleep(300);
-  const union = await count(".grid .card");
+  const union = await listed();
   check(
     "同一字段多选取并集",
     union > metal && union === (await expected(["metal", "paper"], [])),
@@ -283,7 +302,7 @@ export default async function flow({ page, go, sleep, check, load }) {
   );
   await page.click('.facet a.opt[href*="certs=reach"]');
   await sleep(300);
-  const both = await count(".grid .card");
+  const both = await listed();
   check(
     "不同字段取交集",
     both < union && both === (await expected(["metal", "paper"], ["reach"])),
@@ -291,17 +310,78 @@ export default async function flow({ page, go, sleep, check, load }) {
   );
   await page.click("a.clear");
   await sleep(300);
-  check("清除筛选：回到全部", (await count(".grid .card")) === total);
+  check("清除筛选：回到全部", (await listed()) === total);
   await go("#/category/pens?materials=bamboo");
   check(
     "直接打开带筛选的链接：状态来自地址",
-    (await count(".grid .card")) ===
+    (await listed()) ===
       (await ev(
         () =>
           window.__sketch.db
             .list("product")
             .filter((p) => p.category === "pens" && p.materials.includes("bamboo")).length,
       )),
+  );
+
+  // ---- 客户页的排序、搜索、分页：都是地址里的参数 ----
+  await go("#/product");
+  check(
+    "分页：每页 6 个，有页码",
+    (await count("a.card")) === 6 && (await count('a.btn[href*="page=2"]')) === 1,
+  );
+  await page.click('a.btn[href*="page=2"]');
+  await sleep(300);
+  check(
+    "分页：点第 2 页，地址里有 ?page=2，内容换了",
+    (await hash()).includes("page=2") &&
+      (await ev(() => document.querySelector("a.card")?.textContent)) !== "P101",
+  );
+  await go("#/product?sort=-moq");
+  const firstMoq = await ev(() => {
+    const code = document.querySelector("a.card [data-copy]")?.textContent;
+    return Number(window.__sketch.db.find("product", code).moq);
+  });
+  const maxMoq = await ev(() =>
+    Math.max(...window.__sketch.db.list("product").map((p) => Number(p.moq))),
+  );
+  check("排序：起订量从高到低，第一个就是最大的", firstMoq === maxMoq, `${firstMoq} vs ${maxMoq}`);
+  await page.click('a.btn[href*="sort=moq"]');
+  await sleep(300);
+  check("排序：点另一种，地址里换成 ?sort=moq", (await hash()).includes("sort=moq"));
+  await go("#/product?sort=-moq&page=2");
+  await page.type("input[data-search]", "P10");
+  await page.keyboard.press("Enter");
+  await sleep(400);
+  check(
+    "搜索：回车写进地址，别的参数还在",
+    (await hash()).includes("q=P10") && (await hash()).includes("sort=-moq"),
+    await hash(),
+  );
+  check(
+    "搜索：只剩匹配的（P101、P102），页码没了（一页就够）",
+    (await count("a.card")) === 2 &&
+      (await ev(
+        () =>
+          [...document.querySelectorAll("a.btn")].filter((a) => /^\d+$/.test(a.textContent.trim()))
+            .length,
+      )) === 0,
+  );
+  await go("#/product?q=zzzz");
+  check("搜索：没有匹配时是空状态，不是空白", await ev(() => !!document.querySelector(".empty")));
+  await go("#/product?page=999");
+  check("分页：越界的页码停在最后一页", (await count("a.card")) >= 1);
+  await go("#/article");
+  const dates = await ev(() => [...document.querySelectorAll("a.card")].map((c) => c.textContent));
+  check(
+    "日期排序：文章最新在前（首页链接的第一篇是 2026-05-20 那篇）",
+    dates.length === 4 &&
+      (await ev(() => {
+        const first = document.querySelector("a.card [data-copy]")?.textContent;
+        return (
+          window.__sketch.db.list("article").find((a) => a.title === first)?.published ===
+          "2026-05-20"
+        );
+      })),
   );
 
   // ---- 后台表格：分页、搜索、筛选 ----

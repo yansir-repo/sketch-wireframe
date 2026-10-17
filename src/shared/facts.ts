@@ -5,6 +5,35 @@
  */
 import type { Sketch } from "./schema.ts";
 
+/**
+ * 搜索框在一条记录的哪些字段里找：客户看得到、属于这条记录自己的文字（text/choice/term/number/date；ref 指向别的内容，搜它会把“相关型号”的名字当成这条的；不含 internal、不含只当主键用的字段）。
+ * 引擎的匹配和体检（“这个类型没有可搜的字段”）问同一个问题，答案只在这里。
+ */
+export const SEARCHABLE_KINDS = ["text", "choice", "term", "number", "date"];
+export const searchFields = (s: Sketch, type: string): string[] => {
+  const def = s.model[type];
+  if (!def) return [];
+  const title = def.title ?? def.key;
+  return Object.entries(def.fields)
+    .filter(
+      ([n, fd]) =>
+        SEARCHABLE_KINDS.includes(fd.kind) &&
+        fd.internal !== true &&
+        (n !== def.key || n === title),
+    )
+    .map(([n]) => n);
+};
+
+/** 一个 order 值的字段名和方向：“-date” = date 倒序。 */
+export const parseOrder = (o: string): { field: string; desc: boolean } =>
+  o.startsWith("-") ? { field: o.slice(1), desc: true } : { field: o, desc: false };
+
+/** 能当排序依据的字段：有大小可比的标量（不含图片、列表、树、internal）。 */
+export const sortable = (s: Sketch, type: string, field: string): boolean => {
+  const fd = s.model[type]?.fields[field];
+  return fd !== undefined && fd.internal !== true && !["media", "list", "blocks"].includes(fd.kind);
+};
+
 export const factFields = (
   s: Sketch,
   type: string,

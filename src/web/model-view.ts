@@ -4,6 +4,7 @@
  * 真·CRUD：增删改立即生效、状态落 localStorage（见 db.ts）。
  */
 import { isLinkKind } from "../shared/schema.ts";
+import { clampPage, pageCount } from "../shared/order.ts";
 import { ZH } from "../shared/strings.ts";
 import type { Db } from "./db.ts";
 import { renderForm } from "./fields.ts";
@@ -129,8 +130,8 @@ export const renderModelView = (s: Sketch, db: Db, parts: string[], qs = ""): Mo
   const hits = applySel(all, sel, facetFields).filter(
     (r) => !q || text(r).includes(q.toLowerCase()),
   );
-  const pages = Math.max(1, Math.ceil(hits.length / PER));
-  const page = Math.min(pages, Math.max(1, Number(qp.get("p")) || 1));
+  const pages = pageCount(hits.length, PER);
+  const page = clampPage(qp.get("p"), pages);
   let n = 0;
   const facets = facetsOf(s, db, type, facetFields, all, sel, ZH);
   const bar = facetHtml(facets, sel, {
@@ -173,7 +174,7 @@ export const renderModelView = (s: Sketch, db: Db, parts: string[], qs = ""): Mo
       sec(
         `${def.label} · 共 ${all.length} 条`,
         `
-      <div class="tbar"><a class="cbtn" href="#/_model/${esc(type)}/new">+ 新增</a><input class="sk-input" data-search data-base="${base}" data-keep="${esc(toQuery(sel, facetFields))}" value="${esc(q)}" placeholder="搜索，回车确认"></div>
+      <div class="tbar"><a class="cbtn" href="#/_model/${esc(type)}/new">+ 新增</a><input class="sk-input" data-search="q" data-base="${esc(base + (toQuery(sel, facetFields) ? "?" + toQuery(sel, facetFields) : ""))}" value="${esc(q)}" placeholder="搜索，回车确认"></div>
       ${bar}
       ${hits.length ? `<table class="grid-table sk">${head}${body}</table>` : '<div class="empty">（没有符合的记录）</div>'}
       ${pager}`,

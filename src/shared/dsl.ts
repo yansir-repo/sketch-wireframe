@@ -20,6 +20,7 @@ import type {
   Node,
   ParamDecl,
   Option,
+  RecordsSource,
   Row,
   Sketch,
   Source,
@@ -105,6 +106,12 @@ export const brand = (fill?: Fill, to = "/"): Atom => ({
 });
 export const nav = (...paths: string[]): Atom => ({ slot: "nav", paths });
 export const form = (): Atom => ({ slot: "form" });
+/** 搜索框：回车把输入的文字写进自由文本参数 param（?q=…），列表的 search 读它。fill = 框里的提示字（不写 = 波浪线）。 */
+export const search = (param: string, fill?: Fill): Atom => ({
+  slot: "search",
+  param,
+  ...(fill === undefined ? {} : { fill }),
+});
 /** 渲染一个 blocks 字段里存的树（文章正文）。 */
 export const embed = (fill?: Fill): Atom => ({
   slot: "embed",
@@ -136,11 +143,24 @@ export const each = (source: Source, item?: Node, opts: ArrangeOpts = {}): Each 
   ...(opts.rule ? { rule: true } : {}),
 });
 
-/** 某个类型的记录（可带条件）。 */
-export const records = (
-  type: string,
-  opts: { where?: Record<string, string>; limit?: number; notSelf?: boolean } = {},
-): Source => ({ records: type, ...opts });
+/**
+ * 某个类型的记录（可带条件）。order：`"-date"` 倒序 / `"name"` 正序 / `{ param }` 由页面参数决定；
+ * search / page：`{ param }`，搜索词和页码来自页面的自由文本参数（free()）；page 要和 limit 一起写（每页几条）。
+ */
+export type RecordsOpts = {
+  where?: Record<string, string>;
+  limit?: number;
+  notSelf?: boolean;
+  order?: string | { param: string };
+  search?: { param: string };
+  page?: { param: string };
+};
+export const records = (type: string, opts: RecordsOpts = {}): RecordsSource => ({
+  records: type,
+  ...opts,
+});
+/** 一个分页的各页：每页一项（label / value / on）。传的就是列表用的那个 records 来源。 */
+export const pages = (of: RecordsSource): Source => ({ pages: of });
 /** 某条记录的字段（默认当前记录）：每一项有 label 和 value；kv 列表展开成一项一行参数。 */
 export const fields = (
   opts: { of?: string; type?: string; only?: string[]; skip?: string[] } = {},
@@ -159,6 +179,13 @@ export const oneOf = (values: string[], dflt?: string): ParamDecl => ({
 });
 /** 多选的状态参数（手风琴）：可以同时有几个值，默认一个都没有。 */
 export const manyOf = (values: string[]): ParamDecl => ({ values, multi: true });
+
+/** 自由文本的状态参数（搜索词、页码）：取值不是有限集合，验证器只抽样；default 是不写时的值（页码 "1"）。 */
+export const free = (dflt?: string): ParamDecl => ({
+  values: [],
+  free: true,
+  ...(dflt === undefined ? {} : { default: dflt }),
+});
 
 /** 条件出现。`"tab=specs"` = tab 等于 specs；`"open=q1"` 对多选参数是“包含”；`"a|b"` = 几个参数里任意一个有值。 */
 export const when = <T extends Node>(cond: string | When, n: T): T => {
@@ -212,10 +239,25 @@ export const accordion = (
 // ---- 简写：都只是几行 each ----
 
 /** 一排某类型的记录卡片（用那个类型的 card，点进详情页）。 */
-export const collection = (
-  type: string,
-  opts: { where?: Record<string, string>; limit?: number; notSelf?: boolean } = {},
-): Each => each(records(type, opts), undefined, { dir: "grid" });
+export const collection = (type: string, opts: RecordsOpts = {}): Each =>
+  each(records(type, opts), undefined, { dir: "grid" });
+
+/**
+ * 排序菜单：一排“改排序参数”的链接，选中的那个实心。参数是有限取值的单选，取值写成 order 的写法（"-date" / "name"）：
+ * `state: { sort: oneOf(["-date", "name"]) }` + `records(…, { order: { param: "sort" } })` + `sortMenu("sort", [["-date", "Newest"], ["name", "A–Z"]])`。
+ */
+export const sortMenu = (param: string, items: Array<[value: string, label: string]>): Group =>
+  row(...items.map(([v, label]) => action(label, undefined, { ghost: true, set: { [param]: v } })));
+
+/** 页码：每页一个链接（改页码参数），当前页实心。传的是列表用的那个 records 来源（要写了 page 和 limit）。 */
+export const pager = (of: RecordsSource): Each => {
+  const param = of.page?.param ?? "page";
+  return each(
+    pages(of),
+    action(bind("o.label"), undefined, { ghost: true, set: { [param]: bind("o.value") } }),
+    { as: "o", dir: "row" },
+  );
+};
 
 /** 当前记录的字段表。skip = 去掉哪些；only = 只要哪些（按这个顺序）。一页想分成几个板块，就每个板块写自己的 only。 */
 export const facts = (opts: { skip?: string[]; only?: string[] } = {}): Each =>
@@ -310,6 +352,11 @@ export const f = {
     label,
     ...o,
   }),
+  /** 日期（ISO，2026-10-17）：能排序、表单里是日期输入。 */
+  date: (
+    label: string,
+    o: { table?: boolean; detail?: boolean; internal?: boolean } = {},
+  ): Field => ({ kind: "date", label, ...o }),
   bool: (
     label: string,
     o: { table?: boolean; detail?: boolean; internal?: boolean } = {},

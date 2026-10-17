@@ -26,8 +26,11 @@ import {
   max,
   min,
   nav,
+  pager,
   records,
   row,
+  search,
+  sortMenu,
   steps,
   sum,
   avg,
@@ -729,5 +732,114 @@ describe("session parameters (who is looking)", () => {
       rc({ stored: { viewer: ["member"] } }),
     );
     expect(html).toContain("viewer=visitor");
+  });
+});
+
+describe("query: order, search, page (state in the address, like filters)", () => {
+  const state = {
+    sort: { values: ["code", "-moq", "moq"], default: "code" },
+    q: { values: [], free: true },
+    page: { values: [], free: true, default: "1" },
+  };
+  const list = records("product", {
+    limit: 4,
+    order: { param: "sort" },
+    search: { param: "q" },
+    page: { param: "page" },
+  });
+  const rc = (sel: Record<string, string[]> = {}) => rcOf(example, { state, sel });
+  /** 渲染出来的卡片里的型号编码，按出现顺序。 */
+  const codes = (sel: Record<string, string[]> = {}) =>
+    [
+      ...node(each(list, text(3, bind("it.code")), { dir: "col" }), rc(sel)).matchAll(
+        /data-copy>([^<]+)</g,
+      ),
+    ].map((m) => m[1]!);
+
+  it("sorts by the parameter's field; '-' is descending; numbers compare as numbers, empties go last", () => {
+    expect(codes({ sort: ["moq"] }).length).toBe(4);
+    const db = rc().db;
+    const moq = (c: string) => Number(db.find("product", c)!["moq"]);
+    const asc = codes({ sort: ["moq"] }).map(moq);
+    const desc = codes({ sort: ["-moq"] }).map(moq);
+    expect(asc).toEqual([...asc].sort((a, b) => a - b));
+    expect(desc).toEqual([...desc].sort((a, b) => b - a));
+    expect(desc[0]).toBeGreaterThan(asc[0]!);
+  });
+
+  it("a fixed order works without a parameter, and a date field sorts newest first", () => {
+    const html = node(
+      each(records("article", { order: "-published" }), text(3, bind("it.published")), {
+        dir: "col",
+      }),
+      rcOf(example),
+    );
+    const dates = [...html.matchAll(/data-copy>(\d{4}-\d\d-\d\d)</g)].map((m) => m[1]!);
+    expect(dates.length).toBe(4);
+    expect(dates).toEqual([...dates].sort().reverse());
+  });
+
+  it("a value that is not a sortable field (a hand-edited address) is ignored, not a crash", () => {
+    expect(codes({ sort: ["nonsense"] }).length).toBe(4);
+  });
+
+  it("search keeps the records whose visible text contains the word, case-insensitively, through term labels too", () => {
+    expect(codes({ q: ["p10"] }).sort()).toEqual(["P101", "P102"]);
+    expect(codes({ q: ["笔类"] }).every((c) => c.startsWith("P"))).toBe(true); // 搜的是 term 的显示名（“笔类”），不是存的 id
+    expect(codes({ q: ["笔类"] }).length).toBeGreaterThan(0);
+    expect(codes({ q: ["pens"] }).length).toBe(0); // id 不是客户看到的字
+    expect(
+      node(each(list, text(3, bind("it.code")), { dir: "col" }), rc({ q: ["zzzz"] })),
+    ).toContain("empty");
+  });
+
+  it("pages slice by limit; a page past the end stops at the last page; garbage is page 1", () => {
+    const all = rc().db.list("product").length;
+    const last = Math.ceil(all / 4);
+    const lastCount = all - (last - 1) * 4;
+    expect(codes({ page: ["1"] }).length).toBe(4);
+    expect(codes({ page: ["2"] })).not.toEqual(codes({ page: ["1"] }));
+    expect(codes({ page: ["999"] }).length).toBe(lastCount);
+    expect(codes({ page: ["x"] })).toEqual(codes({ page: ["1"] }));
+  });
+
+  it("the pager has one link per page, marks the current one, and keeps the other parameters", () => {
+    const html = node(pager(list), rc({ page: ["2"], sort: ["-moq"] }));
+    const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]!);
+    expect(hrefs.length).toBe(Math.ceil(rc().db.list("product").length / 4));
+    expect(hrefs[0]).not.toContain("page="); // 第 1 页 = 默认值，省掉
+    expect(hrefs[1]).toContain("page=2");
+    expect(hrefs.every((h) => h.includes("sort=-moq"))).toBe(true);
+    expect(html.match(/class="btn on"/g)?.length).toBe(1);
+  });
+
+  it("the pager follows the search: fewer matches, fewer pages, and none at all when one page is enough", () => {
+    expect(node(pager(list), rc({ q: ["p10"] }))).toBe("");
+  });
+
+  it("sortMenu: one link per ordering, the current one filled", () => {
+    const html = node(
+      sortMenu("sort", [
+        ["code", "A"],
+        ["-moq", "B"],
+      ]),
+      rc({ sort: ["-moq"] }),
+    );
+    expect(html).toContain("sort=-moq");
+    expect(html.match(/class="btn on"/g)?.length).toBe(1);
+  });
+
+  it("the search box keeps the word, and its base address clears the parameter but carries the rest", () => {
+    const html = node(search("q"), rc({ q: ["pen"], sort: ["moq"] }));
+    expect(html).toContain('value="pen"');
+    const base = /data-base="([^"]+)"/.exec(html)![1]!;
+    expect(base).toContain("sort=moq");
+    expect(base).not.toContain("q=");
+  });
+
+  it("lines fidelity leaks no copy through a search box or a sort; a search box without a hint is a scribble", () => {
+    const lines = rcOf(example, { state, sel: {}, fid: "lines" });
+    expect(node(search("q", "Find a model"), lines)).not.toContain("data-copy");
+    expect(node(search("q"), rc())).toContain("sq");
   });
 });

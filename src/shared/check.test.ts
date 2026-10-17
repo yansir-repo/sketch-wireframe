@@ -20,9 +20,13 @@ import {
   manyOf,
   nav,
   sum,
+  free,
   oneOf,
+  pager,
   records,
+  search,
   section,
+  sortMenu,
   tabs,
   text,
   when,
@@ -600,5 +604,91 @@ describe("session parameters", () => {
     const s = withSession({ tab: plain(oneOf(["a", "b"])) });
     s["pages"]["/"].state = { tab: plain(oneOf(["a", "b"])) };
     expect(errorsOf(s)).toContain("重名");
+  });
+});
+
+describe("query: order, search, page", () => {
+  /** 在一个单独的列表页上试（不碰范例里 /product 自己的声明）。 */
+  const onProducts = (state: Record<string, unknown>, body: unknown) => {
+    const s = fresh();
+    s["pages"]["/lab"] = {
+      ctx: { type: "product", many: true },
+      state,
+      body: [plain(section("加的", body as Parameters<typeof section>[1]))],
+    };
+    return s;
+  };
+  const okState = {
+    sort: plain(oneOf(["code", "-moq"])),
+    q: plain(free()),
+    page: plain(free("1")),
+  };
+  const list = (o: Record<string, unknown>) => each(records("product", { limit: 4, ...o }));
+
+  it("accepts a fixed order, a parameter order, a search and a page", () => {
+    const s = onProducts(
+      okState,
+      list({ order: "-moq", search: { param: "q" }, page: { param: "page" } }),
+    );
+    expect(errorsOf(s)).toBe("");
+  });
+
+  it("an order on a field that does not exist or cannot be compared is an error", () => {
+    expect(errorsOf(onProducts(okState, list({ order: "nope" })))).toContain("不在类型");
+    expect(errorsOf(onProducts(okState, list({ order: "photos" })))).toContain("不能排序");
+    expect(errorsOf(onProducts(okState, list({ order: "-status" })))).toContain("不能排序"); // internal
+  });
+
+  it("an order parameter must be a single choice of valid orderings", () => {
+    const bad = { ...okState, sort: plain(oneOf(["code", "nope"])) };
+    expect(errorsOf(onProducts(bad, list({ order: { param: "sort" } })))).toContain("nope");
+    expect(
+      errorsOf(onProducts({ ...okState, sort: plain(free()) }, list({ order: { param: "sort" } }))),
+    ).toContain("有限取值");
+    expect(errorsOf(onProducts(okState, list({ order: { param: "ghost" } })))).toContain(
+      "没有在这个页面",
+    );
+  });
+
+  it("search and page parameters must be declared free()", () => {
+    expect(errorsOf(onProducts(okState, list({ search: { param: "sort" } })))).toContain("free()");
+    expect(errorsOf(onProducts({}, list({ search: { param: "q" } })))).toContain("没有在这个页面");
+    expect(
+      errorsOf(onProducts(okState, list({ page: { param: "q" }, limit: undefined }))),
+    ).toContain("limit");
+  });
+
+  it("a search box and a pager need the same declarations; a pager needs a paged source", () => {
+    expect(errorsOf(onProducts(okState, search("q")))).toBe("");
+    expect(errorsOf(onProducts({}, search("q")))).toContain("没有在这个页面");
+    expect(errorsOf(onProducts(okState, search("sort")))).toContain("free()");
+    expect(errorsOf(onProducts(okState, pager(records("product", { limit: 4 }))))).toContain(
+      "page",
+    );
+    expect(errorsOf(onProducts(okState, sortMenu("sort", [["code", "A"]])))).toBe("");
+  });
+
+  it("a type with nothing searchable cannot be searched", () => {
+    const s = onProducts(okState, each(records("category", { limit: 4, search: { param: "q" } })));
+    s["model"]["category"].fields = {}; // 词表只剩主键
+    expect(errorsOf(s)).toMatch(/没有能搜的字段|主键/);
+  });
+
+  it("free parameters are declared without values; a free default is allowed (page 1), a free multi is not", () => {
+    expect(errorsOf(onProducts({ q: { values: ["a"], free: true } }, text(3, "x")))).toContain(
+      "free 参数不写",
+    );
+    expect(errorsOf(onProducts({ q: plain(free("1")) }, text(3, "x")))).toBe("");
+  });
+
+  it("a free parameter takes any value in when / set", () => {
+    const s = onProducts(okState, when({ param: "q", is: "anything" }, text(3, "x")));
+    expect(errorsOf(s)).toBe("");
+  });
+
+  it("a search box cannot live inside a stored tree (it is page chrome)", () => {
+    const s = fresh();
+    s["model"]["article"].seed[0].body = [plain(search("q"))];
+    expect(errorsOf(s)).toContain("search");
   });
 });

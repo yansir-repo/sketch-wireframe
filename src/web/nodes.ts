@@ -15,7 +15,8 @@ import { keyOf, titleFieldOf } from "../shared/derive.ts";
 import { renderForm } from "./fields.ts";
 import { applySel, facetsOf, toQuery, type Sel } from "./facets.ts";
 import { display, esc, isEmpty, recordTitle } from "./fmt.ts";
-import { factFields } from "../shared/facts.ts";
+import { factFields, parseOrder, searchFields, sortable } from "../shared/facts.ts";
+import { clampPage, compareKeys, pageCount, sortKey } from "../shared/order.ts";
 import { isMultiParam, parsePath } from "../shared/scope.ts";
 import { scalar } from "../shared/scalar.ts";
 import type {
@@ -27,6 +28,7 @@ import type {
   Node,
   Page,
   ParamDecl,
+  RecordsSource,
   Row,
   Sketch,
   Source,
@@ -375,7 +377,43 @@ const resolveWhere = (rc: RC, where: Readonly<Record<string, string>> | undefine
         ]),
       );
 
+/** 自由文本参数现在的值（搜索词）：地址里 ?q=a,b 被拆成了两段，拼回去。 */
+const freeNow = (rc: RC, param: string): string => paramNow(rc, param).join(",").trim();
+
+/** records 的排序：写死的字段，或由单选参数的值决定；值不是字段（地址被手改过）就不排。 */
+const orderOf = (rc: RC, src: RecordsSource): string | undefined =>
+  src.order === undefined
+    ? undefined
+    : typeof src.order === "string"
+      ? src.order
+      : paramNow(rc, src.order.param)[0];
+
+const sortRows = (rc: RC, type: string, rows: Row[], order: string): Row[] => {
+  const { field, desc } = parseOrder(order);
+  const fd = rc.s.model[type]?.fields[field];
+  if (!fd || !sortable(rc.s, type, field)) return rows;
+  const key = new Map(
+    rows.map((r) => [r, sortKey(fd.kind, r[field], display(rc.s, rc.db, type, r, field))]),
+  );
+  return [...rows].sort((a, b) => compareKeys(key.get(a)!, key.get(b)!, desc));
+};
+
+/** 搜索：词（不分大小写）出现在可搜字段的显示文字里。 */
+const searchRows = (rc: RC, type: string, rows: Row[], term: string): Row[] => {
+  const t = term.toLowerCase();
+  const names = searchFields(rc.s, type);
+  return t === ""
+    ? rows
+    : rows.filter((r) =>
+        names.some((n) => display(rc.s, rc.db, type, r, n).toLowerCase().includes(t)),
+      );
+};
+
+const pageNow = (rc: RC, src: RecordsSource, total: number): number =>
+  clampPage(freeNow(rc, src.page!.param), total);
+
 const sourceRows = (rc: RC, src: Source): unknown[] => {
+  if ("pages" in src) return sourceRows(rc, src.pages);
   if ("records" in src) {
     let rows = query(
       rc.db,
@@ -386,6 +424,9 @@ const sourceRows = (rc: RC, src: Source): unknown[] => {
       !!src.notSelf,
     );
     if (src.records === rc.listType) rows = applySel(rows, rc.sel, filterKeys(rc, src.records));
+    if (src.search) rows = searchRows(rc, src.records, rows, freeNow(rc, src.search.param));
+    const order = orderOf(rc, src);
+    if (order) rows = sortRows(rc, src.records, rows, order);
     return rows;
   }
   if ("items" in src) return itemsOf(rc, src.items);
@@ -611,6 +652,13 @@ const atom = (n: Atom, rc: RC): string => {
         .join("");
       return `<div class="embed">${inner}</div>`;
     }
+    case "search": {
+      // 回车把输入的文字写进参数（mount.ts 听 [data-search]）；data-base 是“清掉这个参数”的地址，别的参数原样带着
+      const r = fillText(rc, n.fill);
+      const hint = rc.fid === "words" && r.kind === "val" && r.val.kind === "text" ? r.val.v : "";
+      const base = hrefSet(rc, { [n.param]: "" });
+      return `<label class="search" data-rough="frame" data-seed="${seed(rc)}"><input type="search" data-search="${esc(n.param)}" data-base="${esc(base)}" value="${esc(freeNow(rc, n.param))}" placeholder="${esc(hint || " ")}"${hint ? " data-copy" : ""}>${hint ? "" : `<span class="sq in" data-rough="sq" data-seed="${seed(rc)}" data-lines="100" data-t="3" style="width:96px;height:12px"></span>`}</label>`;
+    }
     case "form":
       return rc.createType ? renderForm(rc.s, rc.db, rc.createType, null, "public", rc.sel) : "";
   }
@@ -675,7 +723,9 @@ const eachNode = (n: Each, rc: RC): string => {
   if ("records" in src) {
     const def = rc.s.model[src.records]!;
     const all = sourceRows(rc, src) as Row[];
-    const shown = all.slice(0, src.limit ?? 6);
+    const per = src.limit ?? 6;
+    const p = src.page ? pageNow(rc, src, pageCount(all.length, per)) : 1;
+    const shown = all.slice((p - 1) * per, p * per);
     if (!shown.length) {
       const filtered = filterKeys(rc, src.records).some((k) => rc.sel[k]?.length);
       return `<div class="coll"><div class="empty">${esc(filtered ? L.emptyFiltered(def.label) : L.empty(def.label))}</div></div>`;
@@ -701,8 +751,20 @@ const eachNode = (n: Each, rc: RC): string => {
       };
     });
     // “共 N 个”只属于默认的卡片列表；自己写了 item 的（对比表的一列格子）不带它
-    if (!n.item && all.length > shown.length)
+    if (!n.item && !src.page && all.length > shown.length)
       footer = `<div class="more">${esc(L.more(all.length))}</div>`;
+  } else if ("pages" in src) {
+    if (!n.item) return "";
+    const per = src.pages.limit ?? 6;
+    const total = pageCount(sourceRows(rc, src.pages).length, per);
+    if (total <= 1) return "";
+    const now = pageNow(rc, src.pages, total);
+    kids = Array.from({ length: total }, (_, i) => String(i + 1)).map((v) => ({
+      html: node(
+        n.item!,
+        withVars(rc, as, { kind: "option", value: v, label: v, on: Number(v) === now }),
+      ),
+    }));
   } else if ("fields" in src) {
     if (!n.item) return "";
     kids = fieldEntries(rc, src).map((e) => ({ html: node(n.item!, withVars(rc, as, e)) }));
@@ -740,7 +802,7 @@ const eachNode = (n: Each, rc: RC): string => {
         withVars(rc, as, { kind: "option", value: v, label: v, on: now.includes(v) }),
       ),
     }));
-  } else {
+  } else if ("items" in src) {
     // items：term/ref 的各条记录、图片、列表的各行。没有项时摆几个占位，让结构读得出来
     const rows = itemsOf(rc, src.items);
     const first = rows[0] as { dataUrl?: string; type?: string } | undefined;

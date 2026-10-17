@@ -215,6 +215,11 @@ export const bindSource = (
       ? { ok: true, var: { kind: "record", type: source.records } }
       : { ok: false, error: `records 的类型 ${source.records} 不存在` };
   }
+  if ("pages" in source) {
+    return s.model[source.pages.records]
+      ? { ok: true, var: { kind: "option" } }
+      : { ok: false, error: `pages 的类型 ${source.pages.records} 不存在` };
+  }
   if ("fields" in source) {
     const f = source.fields;
     let type = f.type;

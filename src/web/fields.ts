@@ -79,6 +79,8 @@ const control = (
       return fd.multiline
         ? `<wired-textarea rows="3" placeholder="${esc(fd.label)}"${dis}>${esc(value ?? "")}</wired-textarea>`
         : `<wired-input placeholder="${esc(fd.label)}" value="${esc(value ?? "")}"${dis}></wired-input>`;
+    case "date":
+      return `<wired-input type="date" placeholder="${esc(fd.label)}" value="${esc(value ?? "")}"${dis}></wired-input>`;
     case "number":
       return `<wired-input type="number" placeholder="${esc(fd.label)}" value="${esc(value ?? "")}"${dis}></wired-input>`;
     case "bool":
@@ -141,6 +143,7 @@ export const readField = (container: Element | Document, name: string, fd: Field
   if (!wrap) return undefined;
   switch (fd.kind) {
     case "text":
+    case "date":
       return (
         (wrap.querySelector("wired-textarea, wired-input") as { value?: string } | null)?.value ??
         ""

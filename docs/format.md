@@ -7,9 +7,9 @@
 
 ```
 Node   = 叶子 | 排列 | 生成
-叶子   = text | image | action | brand | nav | form | embed
+叶子   = text | image | action | brand | nav | form | embed | search
 排列   = Group(dir, Node[])                  dir ∈ col | row | grid；任何节点可带 when（条件出现）；组可以是 link（可点）
-生成   = Each(dir, x ∈ 来源) → Node          来源 = records | fields | items | distinct | facets | options | param
+生成   = Each(dir, x ∈ 来源) → Node          来源 = records | pages | fields | items | distinct | facets | options | param
 fill   = ∅（粗波浪线）| "文案" | bind(路径) | fold(op, 来源, 字段)        op ∈ count | sum | min | max | avg
 Page   = 路由 × 环境 → Node                  环境 = 命名绑定（页面记录叫 page、each 里的 x……）+ 状态参数（地址里的 ?query；会话级的存在浏览器里）
 ```
@@ -33,6 +33,7 @@ Page   = 路由 × 环境 → Node                  环境 = 命名绑定（页�
 | `nav(...paths)` | 导航，名字取自各路由的页面名。放不下时引擎自动收进手绘的菜单按钮 | |
 | `embed(fill)` | 把一个 `blocks` 字段里存的那棵树渲染出来（文章正文）。树里不能再有 embed / form / nav / brand | 必须绑一个 blocks 字段 |
 | `form()` | 新增表单（页面上下文是“新增 T”时）；地址里 `?字段=值` 是初始值 | |
+| `search(参数, fill?)` | 搜索框：回车把输入的文字写进自由文本参数（`?q=…`），列表的 `search` 读它。页面壳，不能放进 blocks 的树里 | `fill` = 框里的提示字，不写 = 波浪线 |
 
 ### 排列
 
@@ -51,10 +52,11 @@ Page   = 路由 × 环境 → Node                  环境 = 命名绑定（页�
 
 | 来源 | 逐项生成什么 | 每一项有 |
 |---|---|---|
-| `records("类型", {where?, limit?, notSelf?})` | 某类型的记录（`where` 的值：`":param"` 路由参数、`"$field"` 页面记录的字段、字面量） | 这条记录的字段，`@title` = 显示名。`item` 可以不写：用那个类型的 `card`（没有就是 图 + 显示名），并链到详情页 |
+| `records("类型", {where?, limit?, notSelf?, order?, search?, page?})` | 某类型的记录（`where` 的值：`":param"` 路由参数、`"$field"` 页面记录的字段、字面量）；`order` / `search` / `page` 见下面“排序、搜索、分页” | 这条记录的字段，`@title` = 显示名。`item` 可以不写：用那个类型的 `card`（没有就是 图 + 显示名），并链到详情页 |
 | `fields({of?, type?, only?, skip?})` | 一条记录的字段（默认当前记录；kv 列表展开成一行行参数） | `label` `value` `field`。客户页不摆空字段，整块都空时把字段名全摆出来，值是波浪线。`type` 不带 `of` = 只要字段名（对比表的行头） |
 | `distinct(类型, 字段)` | 这个字段出现过的各个值（多值字段逐个展开） | `label` `value` `count`（有这个值的记录数）：分组统计 |
 | `facets(字段[])` / `options("x")` | 列表页这些字段的筛选面 / 某一项的各个选项 | facets 项：`label` `field`；选项：`label` `value` `count`（“再选它还剩几个”）|
+| `pages(records 来源)` | 一个分页的各页（只有一页时什么都不生成） | `label` `value`（页码） |
 | `param("名")` | 页面声明的一个状态参数的各个取值 | `label` `value` |
 | `items("字段")` | 一个多值字段的各项：term/ref → 对方的记录；media → 图片；list → 每一行 | 对应的记录 / 图 / 行 |
 
@@ -76,7 +78,29 @@ compare(type, 字段[], {where?, limit?})        // 对比表：外层逐个字�
   = each(fields({type, only}), row(text(bind("f.label")), each(records(type,…), text(bind("p.{f.field}")), {as:"p", dir:"row"})), {as:"f", rule:true})
 ```
 
-没填的一律是粗波浪线（见下）。`facts` 想分成几个板块，就每个板块写自己的 `only`，别重复同一个 `facts()`。
+没填的一律是粗波浪线（见下）。
+
+### 排序、搜索、分页（`records` 的三个可选项）
+
+三者都是**地址里的参数**——和筛选、标签页同一个机制，所以每个状态都可分享、可回退、被验证器点到：
+
+```ts
+const LIST = records("product", {
+  limit: 6,                       // 分页时 limit 就是每页几条
+  order: { param: "sort" },       // 或写死："-moq"（倒序）、"name"（正序）
+  search: { param: "q" },         // 参数里的词（不分大小写）出现在记录自己的可显示文字里才留下
+  page: { param: "page" },        // 页码；越界停在最后一页，不是数字当第 1 页
+});
+state: { sort: oneOf(["code", "-moq"]), q: free(), page: free("1") },   // 搜索词和页码是自由文本参数（free），排序是有限取值
+row(search("q"), sortMenu("sort", [["code", "型号"], ["-moq", "起订量从高到低"]])),
+each(LIST, undefined, { dir: "grid" }),
+pager(LIST),                      // 同一个 records 来源：页数由它筛出的条数和 limit 算
+```
+
+- **排序**：数字按数值、其余按显示文字（term/choice 按显示名）、`date` 按 ISO 日期；**空值永远排最后**。图片/列表/内容树/internal 字段不能当排序依据。`order` 的参数必须是有限取值的单选，每个取值都是一种排序（字段名，`-` 开头 = 倒序）。
+- **搜索**：找 text / choice / term / number / date 字段的显示文字（不含 internal，不含只当主键的字段，不含 ref——别的记录的名字不算这一条的）。没有后端：纯文本包含匹配，不做相关性排序。
+- **分页**：`pager` 只有一页时不出现。过滤（筛选、搜索）变了，页数跟着变，页码自动夹到范围内。
+- 自由文本参数 `free()` 没有有限的取值，验证器只抽样（该列表第一条记录名里的一个词，和 `?page=2`）。`facts` 想分成几个板块，就每个板块写自己的 `only`，别重复同一个 `facts()`。
 
 ### 没填的一律是粗波浪线
 
@@ -88,6 +112,7 @@ compare(type, 字段[], {where?, limit?})        // 对比表：外层逐个字�
 
 - 页面声明自己的参数：`state: { tab: oneOf(["specs", "related"]) }`（单选，没有值时取 default，默认第一个）、`state: { faq: manyOf(["q1", "q2"]) }`（多选，默认一个都没有）。筛选的参数不用声明：它们就是列表页类型的字段名。
 - **会话级参数**写在草图顶层：`session: { viewer: oneOf(["visitor", "member"]) }`——页眉页脚和每个页面都认识它，切换后一直生效（存在浏览器里，换页不丢；地址里写了以地址为准）。它是“谁在看”的表达：**不是认证**，不存密码、不管权限；真正挡人的仍然只有地址里的 key。
+- 自由文本参数：`free()`（搜索词）、`free("1")`（页码，不写时是 1）。取值不是有限集合，所以不写 values / multi。
 - 名字不能重复：页面参数不能和会话参数、列表页类型的字段重名。
 
 ## 模型（数据结构，照 zeroY 的 shape 词汇）
@@ -105,6 +130,7 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 | 只给后台的字段（审核状态、负责人、核实时间） | `{ internal: true }`：任何客户页面都不能展示它（绑定、facts、筛选、徽章都会被体检拦），公开表单里也没有；后台表格和表单里有 |
 | 可变长、每个记录自己的结构（技术参数） | `f.list(label, {key:"参数名", value:"参数值"}, {kv:true})`，每行带稳定的 `row_id`（不是下标） |
 | 内容本身是一棵树（文章正文） | `f.blocks(label)`：值是一串节点（和页面同一套语法写成数据，不能含 embed / form / nav / brand），详情页用 `embed(bind("body"))` 渲染；后台里是 JSON 文本框，保存时校验 |
+| 日期 | `f.date(label)`：ISO（`2026-10-17`），表单里是日期输入，能排序 |
 | 图片 | `f.media(label)`（后台可上传，浏览器里压到长边 ≤800px） |
 | 访客可提交（询盘） | `defType(label, {public:true, …})` → 自动得到公开表单页，提交的记录出现在后台 |
 | 草稿对客户不可见 | `unlisted: {status:"草稿"}` |
@@ -161,6 +187,6 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 按“生成空间”的边界，剩下的是这几类，遇到时用最接近的写法并在配置里注明，不要为它们另造槽：
 
 - **不进地址的瞬时状态**：悬停、滚动位置、拖动、动画和自动轮播的节奏。这些按定义不是结构；
-- **fold 这一簇之外的计算**：中位数、日期运算、字符串处理。声明“这个值是算出来的”，没有数据就画波浪线；
+- **fold 这一簇之外的计算**：中位数、日期运算（日期只能排序，不能算差）、字符串处理。声明“这个值是算出来的”，没有数据就画波浪线；
 - **真正的认证和权限**：`session` 只表达“不同的人看到不同的结构”，不验证任何人；
 - **页面之外的行为**：支付、搜索引擎、邮件。草图表达结构，这些在网站开发阶段接。
