@@ -16,6 +16,16 @@ import { createDb } from "./db.ts";
 import { matchRoute, pagesOf, referrersOf } from "../shared/derive.ts";
 import { drawAll, rowLineSrc } from "./draw.ts";
 import { strings, ZH } from "../shared/strings.ts";
+import { treeBody } from "./tree-editor.ts";
+import {
+  add as addNode,
+  looksLikeTree,
+  move as moveNode,
+  remove as removeNode,
+  update as updateNode,
+  type Kind,
+  type Tree,
+} from "./tree-ops.ts";
 import { collectRow, listRowHtml, MAX_PHOTOS, photoHtml, shrinkImage } from "./fields.ts";
 import { esc, recordTitle, titleField, vocabLabel } from "./fmt.ts";
 import { renderModelView } from "./model-view.ts";
@@ -116,6 +126,18 @@ export const mount = (sketch: Sketch): void => {
   const renderChrome = () => {
     $("#header-body").innerHTML = node(sketch.header, rcFor());
     $("#footer-body").innerHTML = node(sketch.footer, rcFor());
+  };
+
+  /** 内容树编辑器：唯一的真相在 .tree 的 data-tree；每次操作写回它，并重画大纲和 JSON。 */
+  const pathOf = (el: Element): number[] => {
+    const raw = el.getAttribute("data-path") ?? "";
+    return raw === "" ? [] : raw.split(".").map(Number);
+  };
+  const commitTree = (treeEl: HTMLElement, tree: Tree) => {
+    treeEl.dataset.tree = JSON.stringify(tree);
+    treeEl.querySelector(".tree-body")!.innerHTML = treeBody(tree);
+    const raw = treeEl.querySelector<HTMLTextAreaElement>("[data-tree-raw]");
+    if (raw) raw.value = JSON.stringify(tree, null, 1);
   };
 
   const toast = (msg: string) => window.WPBehaviors?.get($("#toast-root"))?.notify(msg, 3200);
@@ -273,6 +295,22 @@ export const mount = (sketch: Sketch): void => {
     const act = el.dataset.act!;
     if (el.tagName === "A") e.preventDefault();
     switch (act) {
+      case "tree-add":
+      case "tree-del":
+      case "tree-up":
+      case "tree-down": {
+        const treeEl = el.closest<HTMLElement>(".tree");
+        if (!treeEl) break;
+        const tree = JSON.parse(treeEl.dataset.tree ?? "[]") as Tree;
+        const path = pathOf(el);
+        if (act === "tree-add") {
+          const kind = el.parentElement?.querySelector<HTMLSelectElement>("[data-tree-kind]")
+            ?.value as Kind;
+          commitTree(treeEl, addNode(tree, path, kind));
+        } else if (act === "tree-del") commitTree(treeEl, removeNode(tree, path));
+        else commitTree(treeEl, moveNode(tree, path, act === "tree-up" ? -1 : 1));
+        break;
+      }
       case "nav-toggle":
         el.closest("nav")?.classList.toggle("open");
         break;
@@ -359,6 +397,26 @@ export const mount = (sketch: Sketch): void => {
 
   document.addEventListener("change", async (e) => {
     const input = e.target as HTMLInputElement;
+    const treeEl = input.closest?.(".tree") as HTMLElement | null;
+    if (treeEl && input.matches?.("[data-tree-set]")) {
+      const key = input.dataset.treeSet!;
+      const value = input.type === "checkbox" ? input.checked : input.value;
+      commitTree(
+        treeEl,
+        updateNode(JSON.parse(treeEl.dataset.tree ?? "[]") as Tree, pathOf(input), key, value),
+      );
+      return;
+    }
+    if (treeEl && input.matches?.("[data-tree-raw]")) {
+      try {
+        const parsed: unknown = JSON.parse(input.value);
+        if (!looksLikeTree(parsed)) throw new Error("not a tree");
+        commitTree(treeEl, parsed);
+      } catch {
+        toast(ZH.badBlocks);
+      }
+      return;
+    }
     if (input.matches?.("input[data-search]")) {
       const parts = [
         input.value.trim() ? `q=${encodeURIComponent(input.value.trim())}` : "",

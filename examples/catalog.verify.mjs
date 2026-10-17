@@ -157,14 +157,61 @@ export default async function flow({ page, go, sleep, check, load }) {
   }));
   check("embed：正文这棵树被渲染出来", body.embed === 1 && body.kids >= 3, JSON.stringify(body));
   await go("#/_model/article/a1/edit");
+  const nodes0 = await count(".tree-root li.tree-node");
+  check("后台：内容树字段是可编辑的大纲（每个节点一行）", nodes0 >= 3, String(nodes0));
+  // 加一个文字节点到根，写上字，上移到最前，保存，文章页就有它
+  await page.select(".tree-root > .tree-addrow [data-tree-kind]", "text");
+  await page.click('.tree-root > .tree-addrow [data-act="tree-add"]');
+  await ev(() => {
+    const inputs = [
+      ...document.querySelectorAll('.tree-root > li.tree-node input[data-tree-set="fill"]'),
+    ];
+    const el = inputs.at(-1);
+    el.value = "NEWTEXT-FROM-EDITOR";
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await sleep(200);
+  check("后台：加了一个节点", (await count(".tree-root > li.tree-node")) === nodes0 + 1);
+  for (let i = 0; i < nodes0; i++)
+    await ev(
+      (k) =>
+        [...document.querySelectorAll(".tree-root > li.tree-node")][k]
+          ?.querySelector(':scope > .tree-ctl a[data-act="tree-up"]')
+          ?.click(),
+      nodes0 - i,
+    );
+  await sleep(200);
   check(
-    "后台：内容树字段在表单里是 JSON 文本框",
-    (await count('[data-field="body"] wired-textarea')) === 1,
+    "后台：上移到了最前面",
+    await ev(
+      () =>
+        document.querySelector('.tree-root > li.tree-node input[data-tree-set="fill"]')?.value ===
+        "NEWTEXT-FROM-EDITOR",
+    ),
   );
-  await page.$eval('[data-field="body"] wired-textarea', (el) => (el.value = "not json"));
+  const treeBefore = await ev(() => document.querySelector(".tree").dataset.tree);
+  await ev(() => {
+    const raw = document.querySelector("[data-tree-raw]");
+    raw.value = "not json";
+    raw.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await sleep(700);
+  check(
+    "后台：JSON 里写错了会提示，树不变",
+    (await count("[data-toast]")) > 0 &&
+      (await ev(() => document.querySelector(".tree").dataset.tree)) === treeBefore,
+  );
   await page.click('[data-act="submit"]');
-  await sleep(300);
-  check("后台：内容树不是合法 JSON 数组就拒收", (await hash()).endsWith("/edit"));
+  await sleep(600);
+  await go("#/article/a1");
+  check(
+    "编辑后的内容树渲染在文章页上",
+    await ev(() => document.querySelector(".embed")?.textContent.includes("NEWTEXT-FROM-EDITOR")),
+  );
+  await go("#/_model/article/a1/edit");
+  await page.click('.tree-root > li.tree-node:first-of-type .tree-ctl a[data-act="tree-del"]');
+  await sleep(200);
+  check("后台：删掉一个节点", (await count(".tree-root > li.tree-node")) === nodes0);
 
   // ---- 会话参数（谁在看）：切换后换页不丢；页眉随之变化；地址里写了以地址为准 ----
   await load("#/");

@@ -9,6 +9,8 @@ import { esc, asOption, titleField } from "./fmt.ts";
 import type { Field, Row, Sketch } from "../shared/schema.ts";
 import { scalar } from "../shared/scalar.ts";
 import { strings, ZH, type Strings } from "../shared/strings.ts";
+import { treeEditorHtml } from "./tree-editor.ts";
+import { looksLikeTree, type Tree } from "./tree-ops.ts";
 
 export const MAX_PHOTOS = 6;
 const KEY_RE = /^[A-Za-z0-9._-]+$/;
@@ -110,8 +112,8 @@ const control = (
       </div>`;
     }
     case "blocks":
-      // 一棵树在表单里就是它的 JSON：改完保存时按节点语法校验（后台才有这个字段；客户的公开表单里不会有）
-      return `<wired-textarea rows="8" placeholder="[ { &quot;slot&quot;: &quot;text&quot;, &quot;size&quot;: 3, &quot;fill&quot;: &quot;…&quot; } ]"${dis}>${esc(Array.isArray(value) && value.length ? JSON.stringify(value, null, 1) : "")}</wired-textarea>`;
+      // 一棵树在表单里是一个可编辑的大纲（加/删/移动节点、改文字和按钮），任何节点也能在折叠的 JSON 里改
+      return treeEditorHtml(Array.isArray(value) ? (value as Tree) : []);
     case "list": {
       const rows = (Array.isArray(value) ? value : []) as Row[];
       return `<div data-list data-columns="${esc(JSON.stringify(fd.columns))}">
@@ -168,13 +170,12 @@ export const readField = (container: Element | Document, name: string, fd: Field
         caption: el.dataset.caption || undefined,
       }));
     case "blocks": {
-      const raw = (
-        (wrap.querySelector("wired-textarea") as { value?: string } | null)?.value ?? ""
-      ).trim();
-      if (raw === "") return [];
+      // 唯一的真相是 .tree 的 data-tree（编辑器每次操作都写回它）
       try {
-        const parsed: unknown = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : BAD_BLOCKS;
+        const parsed: unknown = JSON.parse(
+          wrap.querySelector<HTMLElement>(".tree")?.dataset.tree ?? "[]",
+        );
+        return looksLikeTree(parsed) ? parsed : BAD_BLOCKS;
       } catch {
         return BAD_BLOCKS;
       }
