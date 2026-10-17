@@ -11,7 +11,7 @@ permissions:
 jobs:
   # The same judgments as pre-push (`vp run ci`): types, lint, tests, effect scan, build.
   gate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -25,7 +25,7 @@ jobs:
   # The engine in a real browser: publish the example to a local dev Worker (real D1 migrations, no Cloudflare
   # credentials), then click through the whole site and run its CRUD flow.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: gate
     steps:
       - uses: actions/checkout@v4
