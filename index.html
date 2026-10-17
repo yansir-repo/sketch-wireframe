@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 所有草图预览一律 noindex：访问控制靠地址里的随机 key，这只是顺手防爬虫收录（不是安全边界） -->
+    <meta name="robots" content="noindex,nofollow" />
+    <title>草图</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Caveat:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="block">
+        <span class="block-tag">Header</span>
+        <div id="header-body"></div>
+      </header>
+      <main id="app"></main>
+      <footer class="block">
+        <span class="block-tag">Footer</span>
+        <div id="footer-body"></div>
+      </footer>
+    </div>
+
+    <!-- 确认框、图片查看器、提示：页面外层各一份，不随路由重建，只初始化一次 -->
+    <div data-behavior="dialog" id="confirm-root">
+      <button data-dialog-open hidden>打开</button>
+      <dialog aria-label="请确认">
+        <p id="confirm-msg"></p>
+        <div class="actions">
+          <button type="button" class="cbtn on" data-act="confirm-yes">确定</button
+          ><button type="button" class="cbtn" data-dialog-close>取消</button>
+        </div>
+      </dialog>
+    </div>
+    <div data-behavior="dialog" id="viewer-root">
+      <button data-dialog-open hidden>打开</button>
+      <dialog aria-label="查看图片">
+        <button type="button" class="cbtn" data-dialog-close>关闭</button>
+        <img id="viewer-img" alt="" />
+        <div class="actions">
+          <button type="button" class="cbtn" data-act="viewer-prev">上一张</button
+          ><span id="viewer-pos"></span
+          ><button type="button" class="cbtn" data-act="viewer-next">下一张</button>
+        </div>
+      </dialog>
+    </div>
+    <div data-behavior="toast" id="toast-root"><div data-toast-region></div></div>
+
+    <script type="module" src="/src/web/main.ts"></script>
+  </body>
+</html>

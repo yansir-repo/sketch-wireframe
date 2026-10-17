@@ -1,0 +1,238 @@
+// 范例草图的业务流程验证：后台增删改、参数行、图片上传、草稿对客户不可见、刷新持久化、访客提交、筛选、分页、搜索。
+// `node scripts/verify.ts <url> --flow examples/catalog.verify.mjs`。通用检查（路由/手绘/保真度/控制台）verify.ts 已经跑了，这里不重复。
+export default async function flow({ page, go, sleep, check, load }) {
+  const CODE = "VERIFY-001";
+  const ev = (fn, ...a) => page.evaluate(fn, ...a);
+  const count = (sel) => page.$$eval(sel, (r) => r.length);
+  const hash = () => ev(() => location.hash);
+  const rows = (type) => ev((t) => window.__sketch.db.all(t).length, type);
+
+  // ---- 新增一个型号：参数行、校验、上传 ----
+  await go("#/_model/product/new");
+  const before = await rows("product");
+  await page.click('[data-field="specs"] [data-act="add-row"]');
+  await page.click('[data-field="specs"] [data-act="add-row"]');
+  check("参数行：能加行", (await count('[data-field="specs"] .lrow')) === 2);
+  await page.$eval(
+    '[data-field="specs"] .lrow:first-of-type wired-input[data-col="key"]',
+    (el) => (el.value = "尺寸"),
+  );
+  await page.$eval(
+    '[data-field="specs"] .lrow:first-of-type wired-input[data-col="value"]',
+    (el) => (el.value = "30cm"),
+  );
+  await page.click('[data-field="specs"] .lrow:last-of-type [data-act="del-row"]');
+  check("参数行：能删行", (await count('[data-field="specs"] .lrow')) === 1);
+
+  await page.$eval('[data-field="code"] wired-input', (el) => (el.value = 'bad"code<'));
+  await page.click('[data-act="submit"]');
+  await sleep(300);
+  check("型号编码带引号/尖括号被拒", (await hash()).endsWith("/new"));
+
+  await page.$eval('[data-field="code"] wired-input', (el, c) => (el.value = c), CODE);
+  await page.$eval('[data-field="category"] wired-combo', (el) => (el.selected = "pens"));
+  await page.$eval('[data-field="status"] wired-radio-group', (el) => (el.selected = "上架"));
+
+  await ev(async () => {
+    const c = document.createElement("canvas");
+    c.width = 2000;
+    c.height = 1500;
+    const x = c.getContext("2d");
+    x.fillStyle = "#c33";
+    x.fillRect(0, 0, 2000, 1500);
+    const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], "big.png", { type: "image/png" }));
+    const input = document.querySelector("[data-photo-input]");
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await sleep(900);
+  const thumb = await page.$eval(".pv img", (i) => ({ w: i.naturalWidth, h: i.naturalHeight }));
+  check(
+    "上传：2000×1500 的图被压到长边 ≤800",
+    thumb.w <= 800 && thumb.h <= 800,
+    `${thumb.w}×${thumb.h}`,
+  );
+
+  await page.click('[data-act="submit"]');
+  await sleep(600);
+  check(
+    "新增保存：回到列表，记录数 +1",
+    (await hash()) === "#/_model/product" && (await rows("product")) === before + 1,
+  );
+
+  // ---- 客户页：用上了后台填的东西 ----
+  await go(`#/product/${CODE}`);
+  const facts = await page.$$eval(".fact", (r) => r.map((e) => e.textContent.trim()));
+  check(
+    "详情页显示后台填的参数行",
+    facts.some((s) => s.includes("尺寸") && s.includes("30cm")),
+    facts.join(" | "),
+  );
+  check(
+    "没填值的参数行存在（显示为波浪线，不是“待填写”）",
+    facts.length >= 1 && !facts.some((s) => s.includes("待填写")),
+  );
+  check("图库显示真实上传的照片", (await count(".gallery .xbox.has-img")) === 1);
+  await page.click('.gallery [data-act="view"]');
+  await sleep(500);
+  const viewer = await ev(() => ({
+    open: document.querySelector("#viewer-root dialog").open,
+    src: document.querySelector("#viewer-img").src.slice(0, 15),
+  }));
+  check(
+    "点真实照片 → 放大查看",
+    viewer.open && viewer.src.startsWith("data:image/jpeg"),
+    JSON.stringify(viewer),
+  );
+  await ev(() => document.querySelector("#viewer-root [data-dialog-close]").click());
+  await sleep(500);
+
+  // ---- 客户页筛选：并集/交集、地址即状态、清除 ----
+  await go("#/product");
+  const expected = (m, c) =>
+    ev(
+      ({ m, c }) =>
+        window.__sketch.db
+          .list("product")
+          .filter(
+            (p) =>
+              (!m.length || m.some((x) => p.materials.includes(x))) &&
+              (!c.length || c.some((x) => p.certs.includes(x))),
+          ).length,
+      { m, c },
+    );
+  const total = await count(".grid .card");
+  check(
+    "全部型号页：侧栏筛选和产品并排",
+    await ev(() => {
+      const a = document.querySelector(".facets")?.getBoundingClientRect(),
+        b = document.querySelector(".grid")?.getBoundingClientRect();
+      return !!a && !!b && a.right <= b.left + 2 && a.width < b.width;
+    }),
+  );
+  await page.click('.facet a.opt[href*="materials=metal"]');
+  await sleep(300);
+  const metal = await count(".grid .card");
+  check(
+    "筛选：选一个材质，只剩含它的型号",
+    metal > 0 && metal < total && metal === (await expected(["metal"], [])),
+    `${total} → ${metal}`,
+  );
+  check("筛选状态写进地址", (await hash()).includes("materials=metal"));
+  await page.click('.facet a.opt[href*="metal,paper"]');
+  await sleep(300);
+  const union = await count(".grid .card");
+  check(
+    "同一字段多选取并集",
+    union > metal && union === (await expected(["metal", "paper"], [])),
+    `${metal} → ${union}`,
+  );
+  await page.click('.facet a.opt[href*="certs=reach"]');
+  await sleep(300);
+  const both = await count(".grid .card");
+  check(
+    "不同字段取交集",
+    both < union && both === (await expected(["metal", "paper"], ["reach"])),
+    `${union} → ${both}`,
+  );
+  await page.click("a.clear");
+  await sleep(300);
+  check("清除筛选：回到全部", (await count(".grid .card")) === total);
+  await go("#/category/pens?materials=bamboo");
+  check(
+    "直接打开带筛选的链接：状态来自地址",
+    (await count(".grid .card")) ===
+      (await ev(
+        () =>
+          window.__sketch.db
+            .list("product")
+            .filter((p) => p.category === "pens" && p.materials.includes("bamboo")).length,
+      )),
+  );
+
+  // ---- 后台表格：分页、搜索、筛选 ----
+  await go("#/_model/product");
+  check(
+    "表格分页：每页 10 行",
+    (await count(".grid-table.sk tr")) === 11,
+    `${await count(".grid-table.sk tr")} 行`,
+  );
+  await go("#/_model/product?q=P10");
+  check("表格搜索：按关键字收窄", (await count(".grid-table.sk tr")) === 3);
+  await go("#/_model/product?category=pens");
+  check(
+    "表格筛选：按分类",
+    (await count(".grid-table.sk tr")) ===
+      1 +
+        (await ev(
+          () => window.__sketch.db.all("product").filter((p) => p.category === "pens").length,
+        )),
+  );
+
+  // ---- 编辑回填；改成草稿后客户看不到 ----
+  await go(`#/_model/product/${CODE}/edit`);
+  check(
+    "编辑：参数行和照片都回填",
+    (await count('[data-field="specs"] .lrow')) === 1 && (await count(".pv")) === 1,
+  );
+  await page.$eval('[data-field="status"] wired-radio-group', (el) => (el.selected = "草稿"));
+  await page.click('[data-act="submit"]');
+  await sleep(600);
+  await go(`#/product/${CODE}`);
+  check("改成草稿后，客户页当不存在", (await count("[data-notfound]")) === 1);
+  await go(`#/_model/product?q=${CODE}`);
+  check(
+    "草稿在后台仍可管理，并标出“客户看不到”",
+    await ev(
+      (c) =>
+        document.body.textContent.includes(c) && document.body.textContent.includes("客户看不到"),
+      CODE,
+    ),
+  );
+
+  // ---- 删除走手绘确认框 ----
+  const n = await rows("product");
+  await page.click(`[data-act="del"][data-key="${CODE}"]`);
+  await sleep(400);
+  await page.click('[data-act="confirm-yes"]');
+  await sleep(600);
+  check("删除：确认框点“确定”后真的删了", (await rows("product")) === n - 1);
+
+  // ---- 刷新后持久化；重置 ----
+  await go("#/_model/product?q=P101");
+  await page.click('[data-act="del"][data-key="P101"]');
+  await sleep(400);
+  await page.click('[data-act="confirm-yes"]');
+  await sleep(600);
+  await load("#/_model/product");
+  check(
+    "刷新页面后删除仍然生效（localStorage）",
+    await ev(() => !window.__sketch.db.all("product").some((p) => p.code === "P101")),
+  );
+  await go("#/_model");
+  await page.click('[data-act="reset"]');
+  await sleep(400);
+  await page.click('[data-act="confirm-yes"]');
+  await sleep(600);
+  check("重置为初始数据", (await rows("product")) === before);
+
+  // ---- 访客提交：公开的“新增”表单，记录出现在后台里 ----
+  await go("#/inquiry");
+  await page.$eval(
+    '[data-field="contact"] wired-input',
+    (el) => (el.value = "verify@example.test"),
+  );
+  await page.click('[data-act="submit"]');
+  await sleep(500);
+  check("提交：出现提示", (await count("[data-toast]")) > 0);
+  check("提交：记录出现在后台里", (await rows("inquiry")) === 1);
+  await go("#/_model/inquiry");
+  check(
+    "询盘列表里能看到刚提交的",
+    await ev(() => document.body.textContent.includes("verify@example.test")),
+  );
+
+  await ev(() => window.__sketch.db.reset());
+}

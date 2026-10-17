@@ -1,0 +1,108 @@
+/**
+ * 页面是模型的影子：每个类型自动得到列表页、详情页（或公开的新增表单页），词表得到“按条目筛选”的页，
+ * 作者只写偏离默认的部分（首页这类无法推出的单例页，以及想换排布的模板）。
+ * 纯函数、不碰 DOM：浏览器里的引擎和 Node 里的 check/verify 用同一份推导。
+ */
+import { bind, collection, facts, badges, form, gallery, section, text } from "./dsl.ts";
+import type { Node, Page, Sketch } from "./schema.ts";
+
+export const keyOf = (s: Sketch, type: string) => s.model[type]!.key;
+export const titleFieldOf = (s: Sketch, type: string) => s.model[type]!.title ?? s.model[type]!.key;
+
+/** 引用某个词表的 (类型, 字段)：词表条目页要列出“用到它的记录”。 */
+export const referrersOf = (s: Sketch, vocabType: string) =>
+  Object.entries(s.model).flatMap(([t, def]) =>
+    Object.entries(def.fields)
+      .filter(([, fd]) => fd.kind === "term" && fd.to === vocabType)
+      .map(([field]) => ({ type: t, field })),
+  );
+
+const defaultDetail = (s: Sketch, type: string): Node[] => {
+  const def = s.model[type]!;
+  const body: Node[] = [];
+  const media = Object.entries(def.fields).find(([, fd]) => fd.kind === "media");
+  if (media) body.push(section("图库", gallery(media[0])));
+  body.push(section("基本信息", text(1, bind(titleFieldOf(s, type))), facts()));
+  for (const [name, fd] of Object.entries(def.fields)) {
+    if (fd.kind === "term" && fd.multiple && fd.detail === false)
+      body.push(section(fd.label, badges(name)));
+  }
+  return body;
+};
+
+export const pagesOf = (s: Sketch): Record<string, Page & { derived?: boolean }> => {
+  const out: Record<string, Page & { derived?: boolean }> = {};
+  for (const [type, def] of Object.entries(s.model)) {
+    if (def.vocab) {
+      // 只有“分类型”的词表（被某个单值 term 字段引用，一条记录属于一类）才有自己的页；cert/ident 这种标签型的不推导
+      const ref = referrersOf(s, type).find((r) => !s.model[r.type]!.fields[r.field]!.multiple);
+      if (ref) {
+        out[`/${type}`] = {
+          name: def.label,
+          ctx: null,
+          body: [section(def.label, collection(type, { limit: 24 }))],
+          derived: true,
+        };
+        out[`/${type}/:id`] = {
+          name: def.label,
+          ctx: { type: ref.type, many: true, where: { [ref.field]: ":id" } },
+          body: [
+            section(
+              s.model[ref.type]!.label,
+              collection(ref.type, { where: { [ref.field]: ":id" }, limit: 24 }),
+            ),
+          ],
+          derived: true,
+        };
+      }
+    } else if (def.public) {
+      out[`/${type}`] = {
+        name: def.label,
+        ctx: { type, create: true },
+        body: [section(def.label, form())],
+        derived: true,
+      };
+    } else {
+      out[`/${type}`] = {
+        name: def.label,
+        ctx: { type, many: true },
+        body: [section(def.label, collection(type, { limit: 24 }))],
+        derived: true,
+      };
+      out[`/${type}/:id`] = {
+        name: def.label,
+        ctx: { type },
+        body: defaultDetail(s, type),
+        derived: true,
+      };
+    }
+  }
+  for (const [pattern, page] of Object.entries(s.pages)) out[pattern] = page; // 同名路由 = 覆盖
+  return out;
+};
+
+export type Params = Record<string, string>;
+export const matchRoute = (
+  patterns: string[],
+  path: string,
+): { pattern: string; params: Params } | null => {
+  const segs = path.split("/").filter(Boolean);
+  let best: { pattern: string; params: Params; score: number } | null = null;
+  for (const pattern of patterns) {
+    const ps = pattern.split("/").filter(Boolean);
+    if (ps.length !== segs.length) continue;
+    const params: Params = {};
+    let score = 0;
+    let ok = true;
+    for (let i = 0; i < ps.length; i++) {
+      if (ps[i]!.startsWith(":")) params[ps[i]!.slice(1)] = decodeURIComponent(segs[i]!);
+      else if (ps[i] === segs[i]) score++;
+      else {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && (!best || score > best.score)) best = { pattern, params, score };
+  }
+  return best && { pattern: best.pattern, params: best.params };
+};

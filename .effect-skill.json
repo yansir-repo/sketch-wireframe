@@ -1,0 +1,42 @@
+{
+  "shape": ["http-server", "db:d1"],
+  "executableEdges": [],
+  "nativeDependencyBoundaries": [],
+  "hostTooling": [
+    {
+      "path": "scripts/**",
+      "owner": "Operator tooling",
+      "reason": "Host programs on the operator's machine: the agent CLI (do.ts, one MCP call per command), the Chrome verifier, local D1 migration, hook and compiler installers, and the DSL import hook."
+    },
+    {
+      "path": "vendor/**",
+      "owner": "Vendored library",
+      "reason": "wp-behaviors, pinned and copied unchanged from its upstream release; never edited here."
+    },
+    {
+      "path": "examples/**",
+      "owner": "Example sketches",
+      "reason": "Data programs written with the DSL; evaluated by the CLI and bundled into the Worker as get_example. They build values, they do not run effects."
+    },
+    {
+      "path": "src/web/**",
+      "owner": "Sketch engine (browser)",
+      "reason": "The browser-side renderer: a pure function from a Sketch and some state to HTML, plus DOM event wiring. It is not Effect code and never runs on the Worker; it only type-imports the Schema."
+    },
+    {
+      "path": "vite.config.ts",
+      "owner": "Build tooling",
+      "reason": "The vite-plus config runs in the build host; it reads process.env.VITEST only to skip the Cloudflare plugin for plain unit tests."
+    }
+  ],
+  "generatedPaths": [],
+  "allowedAdapters": [
+    {
+      "path": "src/worker/index.ts",
+      "owner": "Sketch Worker",
+      "reason": "The fetch edge routes four paths to Effect web handlers, reads the ASSETS binding (a Fetcher) for the engine's page shell, and copies the web handler's response into one native Response; no business logic lives here.",
+      "rules": ["EFF402"]
+    }
+  ],
+  "aiProviderTransports": []
+}

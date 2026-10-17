@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "lib": ["ESNext"],
+    "types": ["@cloudflare/workers-types", "node"],
+    "paths": { "sketch-wireframe": ["../../shared/dsl.ts"] }
+  },
+  "include": [
+    "**/*.ts",
+    "../sketches.ts",
+    "../db.ts",
+    "../clock.ts",
+    "../../shared/**/*.ts",
+    "../../../examples/**/*.ts"
+  ]
+}

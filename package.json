@@ -1,0 +1,37 @@
+{
+  "name": "sketch-wireframe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/effect/install-compiler.mjs && node scripts/hooks-install.mjs"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "roughjs": "4.6.6",
+    "wired-checkbox": "2.1.0",
+    "wired-combo": "2.1.0",
+    "wired-input": "2.1.1",
+    "wired-item": "2.1.0",
+    "wired-radio": "2.1.0",
+    "wired-radio-group": "2.1.0",
+    "wired-textarea": "2.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.sha-52b0dc0e9",
+    "@cloudflare/workers-types": "5.20260908.1",
+    "@effect/tsgo": "0.45.0",
+    "@effect/vitest": "catalog:",
+    "@types/node": "22.15.17",
+    "@yansircc/effect-scan": "0.1.19",
+    "cf": "1.0.0-beta.12",
+    "puppeteer-core": "24.43.1",
+    "typescript": "7.0.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "packageManager": "pnpm@12.4.1"
+}
