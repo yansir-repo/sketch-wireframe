@@ -9,6 +9,8 @@ import {
   bind,
   col,
   collection,
+  compare,
+  count,
   defineSketch,
   defType,
   f,
@@ -18,9 +20,11 @@ import {
   gallery,
   image,
   nav,
+  records,
   row,
   section,
   span,
+  steps,
   text,
   vocab,
 } from "sketch-wireframe";
@@ -91,6 +95,7 @@ const inquiry = defType("获取报价", {
   title: "contact",
   fields: {
     id: f.text("编号"),
+    product: f.ref("意向型号", "product"),
     quantity: f.text("数量"),
     notes: f.text("说明", { multiline: true }),
     contact: f.text("联系方式", { table: true }),
@@ -104,7 +109,7 @@ export default defineSketch({
 
   header: row(
     brand("示例文具"),
-    nav("/", "/category", "/product", "/inquiry"),
+    nav("/", "/category", "/product", "/compare", "/inquiry"),
     action("获取报价", "/inquiry"),
   ),
   footer: row(text(3, "联系方式"), text(3, "版权")),
@@ -127,6 +132,11 @@ export default defineSketch({
         ),
         section("产品分类入口", collection("category", { limit: 8 })),
         section("热门型号", collection("product", { limit: 4 })),
+        // 有顺序的流程：序号和连接线由引擎画，这里只声明“顺序有意义”
+        section(
+          "下单流程",
+          steps(text(2, "咨询"), text(2, "报价"), text(2, "打样"), text(2, "交付")),
+        ),
       ],
     },
 
@@ -134,6 +144,7 @@ export default defineSketch({
     "/category/:id": {
       ctx: { type: "product", many: true, where: { category: ":id" } },
       body: [
+        section("概览", text(2, count(records("product", { where: { category: ":id" } })))),
         section(
           "产品",
           row(
@@ -158,6 +169,20 @@ export default defineSketch({
       ],
     },
 
+    // 对比表：几个字段（行）× 几条记录（列）——两层 each，不是新的槽
+    "/compare": {
+      name: "对比",
+      body: [
+        section(
+          "笔类对比",
+          compare("product", ["materials", "certs", "related"], {
+            where: { category: "pens" },
+            limit: 3,
+          }),
+        ),
+      ],
+    },
+
     "/product/:id": {
       ctx: { type: "product" },
       body: [
@@ -165,7 +190,14 @@ export default defineSketch({
         section("基本信息", text(1, bind("code")), facts({ only: ["category", "materials"] })),
         section("技术参数", facts({ only: ["specs"] })),
         section("相关型号", facts({ only: ["related"] })),
-        section("认证与报价", row(badges("certs"), action("获取报价", "/inquiry"))),
+        // with：把当前型号带去报价表单——表单里“意向型号”已经选好
+        section(
+          "认证与报价",
+          row(
+            badges("certs"),
+            action("为这款获取报价", "/inquiry", { with: { product: bind("code") } }),
+          ),
+        ),
         section(
           "同类型号",
           collection("product", { where: { category: "$category" }, notSelf: true, limit: 4 }),

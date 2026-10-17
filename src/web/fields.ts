@@ -180,12 +180,20 @@ export const readField = (container: Element | Document, name: string, fd: Field
 /** 主键 "id" 且是自动生成的（访客不该填编号）：新建时不显示，编辑时只读显示。 */
 const autoKey = (s: Sketch, type: string) => s.model[type]!.key === "id";
 
+/** ?query 里的一个值 → 字段的初始值（多选字段是数组，其余取第一个）。 */
+const initialValue = (fd: Field, v: ReadonlyArray<string> | undefined): unknown => {
+  if (!v || v.length === 0) return undefined;
+  return fd.multiple ? [...v] : v[0];
+};
+
 export const renderForm = (
   s: Sketch,
   db: Db,
   type: string,
   row: Row | null,
   mode: "public" | "model",
+  /** 地址里带来的初始值（?字段=值）：别处的链接用 action 的 with 把环境带过来，新增表单拿它当初始值。 */
+  initial: Readonly<Record<string, ReadonlyArray<string>>> = {},
 ): string => {
   const def = s.model[type]!;
   const editing = row !== null;
@@ -201,7 +209,7 @@ export const renderForm = (
         db,
         name,
         fd,
-        row ? row[name] : undefined,
+        row ? row[name] : initialValue(fd, initial[name]),
         name === def.key && editing,
         L,
         fd.internal ? "（仅后台）" : "",

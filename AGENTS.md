@@ -30,11 +30,19 @@
 - 验证有两个宿主、一份检查：`src/verify/core.ts`（页面从哪来不是它的事）。线上是 Browser Rendering（`remote.ts` → `browser.ts` 这个 Effect 服务 → MCP 的 `verify_sketch`），本机是 `scripts/verify.ts`。项目自己的流程脚本只能本机跑。
 - `src/worker/tsconfig.json` 带了 `DOM` lib，只因为 `src/verify` 里 `page.evaluate` 的回调要过类型检查；**Worker 代码不能用 DOM 全局**（编译器现在拦不住）。
 
-## 引擎的两条硬规矩（它们是 bug 的类，不是个案）
+## 语言的形状：叶子、排列、生成
 
-- **每个槽只输出一个根元素**：槽放进 `row` 里就是一个 flex 项，输出两个并列元素会被拆开（集合的“共 N 个”曾卡在两组卡片中间）。`src/web/engine.test.ts` 对每种槽、两档保真度、空/截断/正常状态逐一断言。加新槽，先加进那张表。
+- **只有三种东西**（`src/shared/schema.ts`）：叶子（text/image/action/brand/nav/filters/form）、排列（col/row/grid）、生成（`each`：对 records / fields / items 逐项生成）。`collection / facts / badges / gallery / compare / steps` **不是槽**，是 `dsl.ts` 里几行 `each` 的简写。**新需求先问：这是对哪个关系、逐项生成什么？** 不要加槽；真要加叶子，先说明它为什么不是某个 each + 已有叶子的组合。
+- **环境**：页面记录叫 `page`，each 的每一项叫它的 `as`。bind 路径的**语法**和静态解析只在 `src/shared/scope.ts`（体检、质量提醒、引擎运行时求值都用它的 `parsePath`）。树的遍历（带着每处的环境）也只在那里。
+- **链接带环境**：`action.with` 写进目标地址的 `?query`，目标页的新增表单读它当初始值——和筛选状态是同一个机制（地址即状态）。不要为“把上下文带过去”另造机制。
+- **格式版本**：`FORMAT_VERSION`（现在 2）。1 → 2 是把四个槽改写成 `each`（`src/shared/migrate.ts`，读时升级，库里的旧 JSON 原样不动）。这个函数同时是个证明：旧语言能表达的，新语言一个不少；`check.test.ts` 拿旧范例（`fixtures/catalog.v1.json`）逐个对。**移除条件**：库里再没有 `v:1` 的版本（查库：`SELECT count(*) FROM sketch_versions WHERE json LIKE '%"v":1,%'`）。
+
+## 引擎的硬规矩（它们是 bug 的类，不是个案）
+
+- **每个节点只输出一个根元素**：节点放进 `row` 里就是一个 flex 项，输出两个并列元素会被拆开（集合的“共 N 个”曾卡在两组卡片中间）。`src/web/engine.test.ts` 对每种节点、两档保真度、空/截断/正常逐一断言。加新节点，先加进那张表。
 - **引擎自带的、客户会看到的文案只在 `src/web/strings.ts`**，由草图的 `locale` 选语言；`en` 的类型是 `typeof zh`，漏一个键编译器会说。**不要在别处写中文字面量给客户看**（后台 `#/_model` 是运营的界面，永远中文，走 `ZH`）。
-- “facts 显示哪些字段”只在 `src/shared/facts.ts`（引擎渲染和体检问的是同一个问题）；体检里“设计问题”类的提醒只在 `src/shared/quality.ts`。
+- “fields 来源显示哪些字段”只在 `src/shared/facts.ts`（引擎和体检问的是同一个问题）；`where` 的匹配只在 `src/shared/where.ts`；体检里“设计问题”类的提醒只在 `src/shared/quality.ts`。
+- **没填的一律是粗波浪线**：没写 fill、绑定的字段在这条记录上没有值、kv 行没有值。不要为了“好看”编文案和数据。
 
 ## 分层
 

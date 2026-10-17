@@ -2,7 +2,8 @@
  * 一份草图能不能发布，只有一个判断：结构（Schema）→ 语义（validate）→ 红线（redlines）。
  * CLI、MCP 的 check_sketch、发布时的服务端都调这一个函数，所以三处的结论不会不一样。
  */
-import { parseSketch, type Sketch } from "./schema.ts";
+import { parseSketch } from "./parse.ts";
+import type { Sketch } from "./schema.ts";
 import { scanText } from "./redlines.ts";
 import { validate } from "./validate.ts";
 

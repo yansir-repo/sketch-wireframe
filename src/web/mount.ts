@@ -62,6 +62,7 @@ export const mount = (sketch: Sketch): void => {
     fid,
     pages,
     params: {},
+    vars: new Map(),
     seq: { n: 0 },
     viewer,
     sel: parseQuery(loc().qs),
@@ -154,12 +155,16 @@ export const mount = (sketch: Sketch): void => {
         }
         if (trail.length === 1) trail.push([String(title)]);
       } else if (ctx.create) {
-        rc = { ...rc, type: ctx.type };
+        rc = { ...rc, createType: ctx.type };
         trail.push([String(title)]);
       } else {
         const rec = db.find(ctx.type, m.params.id!);
         if (!rec || !db.visible(ctx.type, rec)) return { html: notFound(), title: "404" };
-        rc = { ...rc, type: ctx.type, record: rec };
+        rc = {
+          ...rc,
+          vars: new Map([["page", { kind: "record", type: ctx.type, row: rec }]]),
+          it: "page",
+        };
         title = recordTitle(sketch, db, ctx.type, rec);
         // 分类面包屑只在“那个词表条目页列的就是这个类型”时用（首页 / 产品分类 / 三辊闸 / A106）；
         // 否则是这个类型自己的列表页（首页 / 案例 / case-01）——不能把案例挂到别的栏目名下

@@ -10,7 +10,7 @@ import example from "../../examples/catalog.config.ts";
 import exampleSource from "../../examples/catalog.config.ts?raw";
 import formatGuide from "../../docs/format.md?raw";
 import { checkSketch } from "../shared/check.ts";
-import { sketchJsonSchema } from "../shared/schema.ts";
+import { sketchJsonSchema } from "../shared/parse.ts";
 import { Browser } from "./browser.ts";
 import { get, list, promote, publish, remove, rotateKey, versions } from "./sketches.ts";
 

@@ -5,7 +5,26 @@ import type { Sketch } from "../shared/schema.ts";
 import { createDb, query, type Store } from "./db.ts";
 import { applySel, facetsOf, parseQuery, toQuery, toggled } from "./facets.ts";
 import { renderForm } from "./fields.ts";
-import { node, type RC } from "./nodes.ts";
+import { node, type RC, type RVar } from "./nodes.ts";
+import {
+  action,
+  badges,
+  bind,
+  collection,
+  compare,
+  count,
+  each,
+  facts,
+  fields,
+  gallery,
+  image,
+  items,
+  nav,
+  records,
+  row,
+  steps,
+  text,
+} from "../shared/dsl.ts";
 
 const memory = (): Store & { data: Map<string, string> } => {
   const data = new Map<string, string>();
@@ -125,31 +144,61 @@ describe("facets (filters derived from the model)", () => {
   });
 });
 
+// ---- 渲染 ----
+
+const memoryStore = () => memory();
+
+/** 一个渲染环境。page = 详情页的那条记录；其余按需。 */
+const rcOf = (
+  s: Sketch,
+  o: {
+    fid?: "lines" | "words";
+    page?: { type: string; row: Record<string, unknown> };
+    params?: Record<string, string>;
+    sel?: Record<string, string[]>;
+    createType?: string;
+    listType?: string;
+  } = {},
+): RC => ({
+  s,
+  db: createDb(s, memoryStore()),
+  fid: o.fid ?? "words",
+  pages: pagesOf(s),
+  params: o.params ?? {},
+  vars: new Map<string, RVar>(
+    o.page ? [["page", { kind: "record", type: o.page.type, row: o.page.row }]] : [],
+  ),
+  ...(o.page ? { it: "page" } : {}),
+  ...(o.createType ? { createType: o.createType } : {}),
+  ...(o.listType ? { listType: o.listType } : {}),
+  seq: { n: 0 },
+  viewer: new Map(),
+  sel: o.sel ?? {},
+  path: "/",
+});
+const detail = (s: Sketch, code: string, o: Parameters<typeof rcOf>[1] = {}): RC => {
+  const rc0 = rcOf(s, o);
+  return rcOf(s, { ...o, page: { type: "product", row: rc0.db.find("product", code)! } });
+};
+
 describe("rendering (pure: Sketch + state → HTML)", () => {
   const pages = pagesOf(example);
-  const rcFor = (
-    fid: "lines" | "words",
-    params: Record<string, string>,
-    extra: Partial<RC> = {},
-  ): RC => ({
-    s: example,
-    db: createDb(example, memory()),
-    fid,
-    pages,
-    params,
-    seq: { n: 0 },
-    viewer: new Map(),
-    sel: {},
-    path: "/",
-    ...extra,
-  });
 
   it("renders every page without throwing, in both fidelities", () => {
     for (const fid of ["words", "lines"] as const) {
       for (const [pattern, page] of Object.entries(pages)) {
         const m = matchRoute([pattern], pattern.replace(":id", "pens"));
         expect(m, pattern).not.toBeNull();
-        const rc = rcFor(fid, m!.params, page.ctx?.many ? { listType: page.ctx.type } : {});
+        const base = rcOf(example, { fid, params: m!.params });
+        const c = page.ctx;
+        const row = c && !c.many && !c.create ? base.db.all(c.type)[0] : undefined;
+        const rc = rcOf(example, {
+          fid,
+          params: m!.params,
+          ...(c?.many ? { listType: c.type } : {}),
+          ...(c?.create ? { createType: c.type } : {}),
+          ...(row ? { page: { type: c!.type, row } } : {}),
+        });
         const html = page.body.map((n) => node(n, rc)).join("");
         expect(html.length, `${fid} ${pattern}`).toBeGreaterThan(0);
       }
@@ -157,21 +206,19 @@ describe("rendering (pure: Sketch + state → HTML)", () => {
   });
 
   it("lines fidelity leaks no copy: nothing marked data-copy, and the unfilled slots are scribbles", () => {
-    const rc = rcFor("lines", {});
-    const home = pages["/"]!.body.map((n) => node(n, rc)).join("");
+    const home = pages["/"]!.body.map((n) => node(n, rcOf(example, { fid: "lines" }))).join("");
     expect(home).not.toContain("data-copy");
     expect(home).toContain('data-rough="sq"');
   });
 
   it("words fidelity shows written copy and still draws unwritten slots as scribbles", () => {
-    const rc = rcFor("words", {});
-    const home = pages["/"]!.body.map((n) => node(n, rc)).join("");
+    const home = pages["/"]!.body.map((n) => node(n, rcOf(example))).join("");
     expect(home).toContain("获取报价");
     expect(home).toContain('data-rough="sq"');
   });
 });
 
-/** 一段 HTML 顶层有几个元素：槽放进 row 里就是一个 flex 项，必须恰好一个。 */
+/** 一段 HTML 顶层有几个元素：节点放进 row 里就是一个 flex 项，必须恰好一个。 */
 const rootCount = (html: string): number => {
   let depth = 0;
   let roots = 0;
@@ -189,78 +236,66 @@ const rootCount = (html: string): number => {
   return roots;
 };
 
-describe("slots render exactly one root element", () => {
-  const pages = pagesOf(example);
-  const db = createDb(example, memory());
-  const rc = (extra: Partial<RC>): RC => ({
-    s: example,
-    db,
-    fid: "words",
-    pages,
-    params: {},
-    seq: { n: 0 },
-    viewer: new Map(),
-    sel: {},
-    path: "/",
-    ...extra,
-  });
-  const record = db.find("product", "P101")!;
-  const slots: Array<[string, Parameters<typeof node>[0], Partial<RC>]> = [
-    ["text", { slot: "text", size: 2, fill: "x" }, {}],
-    ["image", { slot: "image" }, {}],
-    ["action", { slot: "action", fill: "Go", to: "/" }, {}],
-    ["brand", { slot: "brand", fill: "Acme" }, {}],
-    ["nav", { slot: "nav", paths: ["/", "/product"] }, {}],
-    ["collection", { slot: "collection", type: "product", limit: 2 }, {}],
+describe("every node renders exactly one root element", () => {
+  const detailRc = (fid: "words" | "lines") => detail(example, "P101", { fid });
+  const cases: Array<[string, Parameters<typeof node>[0], (fid: "words" | "lines") => RC]> = [
+    ["text", text(2, "x"), (f) => rcOf(example, { fid: f })],
+    ["text (bound)", text(3, bind("code")), detailRc],
+    ["text (count)", text(2, count(records("product"))), (f) => rcOf(example, { fid: f })],
+    ["image", image(), (f) => rcOf(example, { fid: f })],
+    ["action", action("Go", "/"), (f) => rcOf(example, { fid: f })],
+    ["action (with)", action("Go", "/inquiry", { with: { product: bind("code") } }), detailRc],
+    ["nav", nav("/", "/product"), (f) => rcOf(example, { fid: f })],
+    ["collection", collection("product", { limit: 2 }), (f) => rcOf(example, { fid: f })],
     [
       "collection (empty)",
-      { slot: "collection", type: "product", where: { category: "nope" } },
-      {},
+      collection("product", { where: { category: "nope" } }),
+      (f) => rcOf(example, { fid: f }),
     ],
-    ["collection (truncated)", { slot: "collection", type: "product", limit: 1 }, {}],
     [
-      "facts",
-      { slot: "facts", only: ["category", "specs", "related"] },
-      { type: "product", record },
+      "collection (truncated)",
+      collection("product", { limit: 1 }),
+      (f) => rcOf(example, { fid: f }),
     ],
-    ["badges", { slot: "badges", field: "certs" }, { type: "product", record }],
-    ["gallery", { slot: "gallery", field: "photos" }, { type: "product", record }],
-    ["filters", { slot: "filters", fields: ["category", "materials"] }, { listType: "product" }],
-    ["form", { slot: "form" }, { type: "inquiry" }],
+    ["facts", facts({ only: ["category", "specs", "related"] }), detailRc],
+    ["badges", badges("certs"), detailRc],
+    ["gallery", gallery("photos"), detailRc],
+    [
+      "compare",
+      compare("product", ["materials", "certs"], { limit: 3 }),
+      (f) => rcOf(example, { fid: f }),
+    ],
+    ["steps", steps(text(2, "a"), text(2, "b")), (f) => rcOf(example, { fid: f })],
+    [
+      "each (items, empty)",
+      each(items("related"), text(3, bind("it.@title"))),
+      (f) => detail(example, "P101", { fid: f }),
+    ],
+    [
+      "filters",
+      { slot: "filters", fields: ["category", "materials"] },
+      (f) => rcOf(example, { fid: f, listType: "product" }),
+    ],
+    ["form", { slot: "form" }, (f) => rcOf(example, { fid: f, createType: "inquiry" })],
   ];
   for (const fid of ["words", "lines"] as const)
-    for (const [name, n, extra] of slots)
-      it(`${name} (${fid})`, () => expect(rootCount(node(n, rc({ fid, ...extra })))).toBe(1));
+    for (const [name, n, mk] of cases)
+      it(`${name} (${fid})`, () => expect(rootCount(node(n, mk(fid)))).toBe(1));
 });
 
-describe("facts: only, lists, refs, internal", () => {
-  const db = createDb(example, memory());
-  const pages = pagesOf(example);
-  const rc = (extra: Partial<RC> = {}): RC => ({
-    s: example,
-    db,
-    fid: "words",
-    pages,
-    params: {},
-    seq: { n: 0 },
-    viewer: new Map(),
-    sel: {},
-    path: "/",
-    type: "product",
-    record: db.find("product", "P101")!,
-    ...extra,
-  });
-
+describe("facts (each over fields): only, lists, refs, internal", () => {
   it("only picks the fields, in that order, and never shows internal ones", () => {
-    const html = node({ slot: "facts", only: ["materials", "category"] }, rc());
+    const rc = detail(example, "P101");
+    const html = node(facts({ only: ["materials", "category"] }), rc);
     expect(html.indexOf("材质")).toBeLessThan(html.indexOf("分类"));
     expect(html).not.toContain("技术参数");
-    expect(node({ slot: "facts" }, rc())).not.toContain("上架状态");
+    expect(node(facts(), rc)).not.toContain("上架状态");
   });
 
   it("renders a ref as links to the target's detail page", () => {
-    const html = node({ slot: "facts", only: ["related"] }, rc());
-    expect(html).toContain('href="#/product/P102"');
+    expect(node(facts({ only: ["related"] }), detail(example, "P101"))).toContain(
+      'href="#/product/P102"',
+    );
   });
 
   it("renders a plain list as rows (one per item), not nothing", () => {
@@ -270,130 +305,148 @@ describe("facts: only, lists, refs, internal", () => {
       { row_id: "r1", a: "切", b: "5mm" },
       { row_id: "r2", a: "压", b: "" },
     ];
-    const db2 = createDb(s, memory());
-    const html = node(
-      { slot: "facts", only: ["steps"] },
-      { ...rc(), s, db: db2, record: db2.find("product", "P101")! },
-    );
+    const html = node(facts({ only: ["steps"] }), detail(s, "P101"));
     expect(html).toContain("<li");
     expect(html).toContain("切 · 5mm");
     expect(html).toContain("压");
   });
 
   it("an internal field is not in the public form but is in the back-office form", () => {
-    const form = (mode: "public" | "model") => renderForm(example, db, "product", null, mode);
+    const rc = rcOf(example);
+    const form = (mode: "public" | "model") => renderForm(example, rc.db, "product", null, mode);
     expect(form("public")).not.toContain('data-field="status"');
     expect(form("model")).toContain('data-field="status"');
+  });
+
+  it("a facts block whose fields are all empty still shows its field names, with scribbles for values", () => {
+    const rc = rcOf(example, {
+      page: { type: "product", row: { code: "X", materials: [], certs: [] } },
+    });
+    const html = node(facts({ only: ["materials", "certs"] }), rc);
+    expect(html).toContain("材质");
+    expect(html).toContain('data-rough="sq"');
+    expect(html.match(/grp row pair/g)?.length).toBe(2);
+  });
+
+  it("a facts block with some values hides the empty ones", () => {
+    const rc = rcOf(example, {
+      page: { type: "product", row: { code: "X", materials: ["metal"], certs: [] } },
+    });
+    const html = node(facts({ only: ["materials", "certs"] }), rc);
+    expect(html).toContain("材质");
+    expect(html).not.toContain("认证");
+  });
+
+  it("an empty kv list (a spec table with no rows yet) shows a few scribbled name/value rows", () => {
+    const rc = rcOf(example, { page: { type: "product", row: { code: "X", specs: [] } } });
+    expect(node(facts({ only: ["specs"] }), rc).match(/grp row pair/g)?.length).toBe(3);
+  });
+});
+
+describe("empty values are scribbles, not nothing", () => {
+  it("a bound field with no value on this record draws a scribble (the author may leave a display name empty)", () => {
+    const html = node(
+      text(3, bind("code")),
+      rcOf(example, { page: { type: "product", row: { code: "" } } }),
+    );
+    expect(html).toContain('data-rough="sq"');
+    expect(html).not.toContain("data-copy");
   });
 });
 
 describe("locale: engine-owned copy follows the sketch", () => {
-  it("English sketches get English empty states, nav menu and filter reset; the default stays Chinese", () => {
-    const en = { ...JSON.parse(JSON.stringify(example)), locale: "en" };
-    const rcOf = (s: Sketch): RC => ({
-      s,
-      db: createDb(s, memory()),
-      fid: "words",
-      pages: pagesOf(s),
-      params: {},
-      seq: { n: 0 },
-      viewer: new Map(),
-      sel: {},
-      path: "/",
-    });
-    const empty = { slot: "collection", type: "product", where: { category: "nope" } } as const;
+  it("English sketches get English empty states and menu; the default stays Chinese", () => {
+    const en: Sketch = { ...JSON.parse(JSON.stringify(example)), locale: "en" };
+    const empty = collection("product", { where: { category: "nope" } });
     expect(node(empty, rcOf(en))).toContain("No 型号 yet");
     expect(node(empty, rcOf(example))).toContain("还没有型号");
-    expect(node({ slot: "nav", paths: ["/"] }, rcOf(en))).toContain("Menu");
-    expect(node({ slot: "nav", paths: ["/"] }, rcOf(example))).toContain("菜单");
+    expect(node(nav("/"), rcOf(en))).toContain("Menu");
+    expect(node(nav("/"), rcOf(example))).toContain("菜单");
   });
 });
 
 describe("nav and brand", () => {
-  const db = createDb(example, memory());
-  const rc: RC = {
-    s: example,
-    db,
-    fid: "words",
-    pages: pagesOf(example),
-    params: {},
-    seq: { n: 0 },
-    viewer: new Map(),
-    sel: {},
-    path: "/",
-  };
   it("a nav renders its links plus a menu button; collapsing is decided by the browser from what fits", () => {
-    const html = node({ slot: "nav", paths: ["/", "/product"] }, rc);
+    const html = node(nav("/", "/product"), rcOf(example));
     expect(html).toContain("nav-toggle");
     expect(html).toContain("nav-links");
     expect(html).not.toContain("collapsed");
   });
   it("a brand is a link home, drawn as a frame, not a button", () => {
-    const html = node({ slot: "brand", fill: "Acme" }, rc);
+    const html = node({ slot: "brand", fill: "Acme" }, rcOf(example));
     expect(html).toContain('class="brand"');
     expect(html).toContain('href="#/"');
     expect(html).not.toContain('class="btn');
   });
 });
 
-describe("empty values are scribbles, not nothing", () => {
-  const db = createDb(example, memory());
-  const rc = (record: Record<string, unknown>): RC => ({
-    s: example,
-    db,
-    fid: "words",
-    pages: pagesOf(example),
-    params: {},
-    seq: { n: 0 },
-    viewer: new Map(),
-    sel: {},
-    path: "/",
-    type: "product",
-    record,
-  });
-  it("a bound field with no value on this record draws a scribble (the author may leave a display name empty)", () => {
-    const html = node({ slot: "text", size: 3, fill: { bind: "code" } }, rc({ code: "" }));
-    expect(html).toContain('data-rough="sq"');
-    expect(html).not.toContain("data-copy");
-  });
-  it("a facts block whose fields are all empty still shows its field names, with scribbles for values", () => {
-    const html = node(
-      { slot: "facts", only: ["materials", "certs"] },
-      rc({ code: "X", materials: [], certs: [] }),
+describe("the generator (each) and the environment", () => {
+  it("binds each item to its name; nested each can reach the outer item by name", () => {
+    const n = each(
+      records("category"),
+      row(
+        text(3, bind("c.label")),
+        each(records("product", { limit: 1 }), text(3, bind("p.code")), { as: "p", dir: "row" }),
+      ),
+      { as: "c", dir: "col" },
     );
-    expect(html).toContain("材质");
-    expect(html).toContain('data-rough="sq"');
-    expect(html.match(/class="fact"/g)?.length).toBe(2);
+    const html = node(n, rcOf(example));
+    expect(html).toContain("笔类");
+    expect(html).toContain("P101");
   });
-  it("a facts block with some values hides the empty ones", () => {
-    const html = node(
-      { slot: "facts", only: ["materials", "certs"] },
-      rc({ code: "X", materials: ["metal"], certs: [] }),
-    );
-    expect(html).toContain("材质");
-    expect(html).not.toContain("认证");
-  });
-});
 
-describe("an empty kv list (a spec table with no rows yet)", () => {
-  it("shows a few scribbled name/value rows, so the section is visibly a table", () => {
-    const db = createDb(example, memory());
+  it("compare = fields (rows) × records (columns): a row per field, a cell per record", () => {
     const html = node(
-      { slot: "facts", only: ["specs"] },
-      {
-        s: example,
-        db,
-        fid: "words",
-        pages: pagesOf(example),
-        params: {},
-        seq: { n: 0 },
-        viewer: new Map(),
-        sel: {},
-        path: "/",
-        type: "product",
-        record: { code: "X", specs: [] },
-      },
+      compare("product", ["category", "materials"], { where: { category: "pens" }, limit: 3 }),
+      rcOf(example),
     );
-    expect(html.match(/class="fact"/g)?.length).toBe(3);
+    // 2 个字段行；每行 3 格
+    expect(html.match(/分类/g)?.length).toBe(1);
+    expect(html.match(/材质/g)?.length).toBe(1);
+    expect(html).toContain("笔类");
+    expect(html).toContain("塑料");
+    expect(html).not.toContain("共"); // 格子不带“共 N 个”
+  });
+
+  it("steps number their children and draw connectors; the order is the structure", () => {
+    const html = node(steps(text(2, "a"), text(2, "b"), text(2, "c")), rcOf(example));
+    expect(html.match(/class="stepno"/g)?.length).toBe(3);
+    expect(html.match(/class="stepsep"/g)?.length).toBe(2);
+  });
+
+  it("an action's with writes the environment into the target address, and a form reads it as initial values", () => {
+    const rc = detail(example, "P102");
+    const link = node(action("Go", "/inquiry", { with: { product: bind("code") } }), rc);
+    expect(link).toContain('href="#/inquiry?product=P102"');
+    const form = node(
+      { slot: "form" },
+      rcOf(example, { createType: "inquiry", sel: { product: ["P102"] } }),
+    );
+    expect(form).toContain('selected="P102"');
+  });
+
+  it("count counts a source", () => {
+    const n = text(2, count(records("product", { where: { category: "pens" } })));
+    expect(node(n, rcOf(example))).toContain(">5<");
+  });
+
+  it("items over a media field with no photos shows placeholders that open the viewer", () => {
+    const rc = detail(example, "P101");
+    const html = node(gallery("photos"), rc);
+    expect(html.match(/data-act="view"/g)?.length).toBe(3);
+    expect([...rc.viewer.values()][0]?.length).toBe(3);
+  });
+
+  it("badges over a multi-valued term show one circle per value", () => {
+    const html = node(badges("certs"), detail(example, "P101"));
+    expect(html.match(/class="circle"/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("fields({type}) with no record yields field names only (a comparison's row heads)", () => {
+    const html = node(
+      each(fields({ type: "product", only: ["materials"] }), text(3, bind("f.label")), { as: "f" }),
+      rcOf(example),
+    );
+    expect(html).toContain("材质");
   });
 });

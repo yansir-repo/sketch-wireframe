@@ -6,43 +6,72 @@
 ## 一个生成式
 
 ```
-Node  = Slot(kind, fill?) | Group(dir, name?, Node[])        （可带 w：在一行里占几份）
-fill  = ∅（粗波浪线）| "文案" | bind("字段")
-Page  = 路由 × 上下文 × Group     上下文 ∈ { 无, 集合 T[]（可带 where）, 记录 T, 新增 T }
+Node   = 叶子 | 排列 | 生成
+叶子   = text | image | action | brand | nav | filters | form
+排列   = Group(dir, Node[])                  dir ∈ col | row | grid
+生成   = Each(dir, x ∈ 来源) → Node          来源 = records(类型, 条件) | fields(一条记录的字段) | items(一个多值字段的各项)
+fill   = ∅（粗波浪线）| "文案" | bind(路径) | count(来源)
+Page   = 路由 × 环境 → Node                  环境 = 一组命名绑定（页面记录叫 page、each 里的 x……）+ 地址里的 ?query
 ```
 
-写法有两种，等价：直接提交 JSON（`check_sketch` / `publish_sketch`），或者写一份 TS 配置（`defineSketch`），由 CLI 求值成 JSON。
-范例见 `get_example`（完整的 TS 源码；`format: "json"` 给 Sketch JSON）；JSON Schema 见 `get_schema`。
+写法有两种，等价：写 TS 配置（`defineSketch`，由 CLI 求值成 JSON），或直接提交 JSON（`get_schema` 给 JSON Schema）。范例见 `get_example`。
 
-### 槽（Slot）
+**记住两件事，其余都是组合：**
 
-| 槽 | 意思 | 填什么 |
+1. **列表、字段表、徽章、图库、对比表、流程都不是槽，是 `each` 的不同写法。** `collection / facts / badges / gallery / compare / steps` 只是 DSL 里几行 `each` 的简写（下面都写出来了）。需要新排法时，先问：这是对哪个关系、逐项生成什么？
+2. **链接带着环境走。** `action(…, "/inquiry", { with: { product: bind("code") } })` 把当前型号写进目标地址的 `?product=…`，目标页的表单拿它当初始值——和筛选状态是同一个机制（地址即状态）。
+
+### 叶子
+
+| 叶子 | 意思 | 填什么 |
 |---|---|---|
-| `text(1\|2\|3, fill?)` | 一段文字（1 标题 / 2 副标题 / 3 正文） | 没填 = 粗波浪线 |
-| `image(fill?)` | 图片占位（叉框）；`bind("photos")` 显示上传的真图 | |
-| `action(fill?, to?, {ghost?})` | 按钮；`to` 是路由 | |
-| `nav(...paths)` | 导航，名字取自各路由的页面名。项多（>7）或窄屏，引擎自动收进一个手绘的菜单按钮——怎么收是引擎的事 | |
-| `brand(fill?, to?)` | logo / 字标，点它回首页（默认 `/`）。**别用 `action` 做 logo**，那会渲染成按钮 | 没填 = 粗波浪线字标 |
-| `collection(type, {where?, limit?, notSelf?})` | 某类型的记录卡片网格 | `where` 的值：`":param"`（路由参数）、`"$field"`（当前记录的字段）、字面量 |
-| `facts({skip?} \| {only?})` | 当前记录的字段表：`kv` 列表展开成参数行，普通列表每行一条，`ref` 显示成指向对方详情页的链接。`only` = 只要这些字段（按这个顺序），`skip` = 去掉这些（二选一）；**一页想分成几个板块，就每个板块写自己的 `only`**，别重复同一个 `facts()` | 没有值的参数 = 粗波浪线 |
-| `badges(field)` | 多选 term / ref 字段的圆圈标签 | |
-| `gallery(field)` | `media` 字段的图库 | |
-| `filters(...fields)` | 筛选（term / ref / choice / bool 字段） | 字段由模型推出，这里只选哪些出现 |
-| `form()` | 新增表单（上下文是“新增 T”时） | |
+| `text(1\|2\|3, fill?)` | 一段文字（1 标题 / 2 副标题 / 3 正文）；`{circle:true}` = 圆圈里的一个词（徽章） | 没填 = 粗波浪线；绑的字段在这条记录上没有值 = 一条粗短线 |
+| `image(fill?)` | 图片占位（叉框）；绑到图片字段显示第一张真图；绑到 `items` 的一张图 = 点开放大 | |
+| `action(fill?, to?, {ghost?, with?})` | 按钮；`to` 是路由；`with` 把环境带去目标页（见上） | |
+| `brand(fill?, to?)` | logo / 字标，点它回首页。**别用 `action` 做 logo**，那会是按钮 | 没填 = 粗波浪线字标 |
+| `nav(...paths)` | 导航，名字取自各路由的页面名。放不下时引擎自动收进手绘的菜单按钮 | |
+| `filters(...fields)` | 筛选（term / ref / choice / bool 字段）。字段由模型推出，这里只选哪些出现 | |
+| `form()` | 新增表单（页面上下文是“新增 T”时）；地址里 `?字段=值` 是初始值 | |
 
-### 组（Group）
+### 排列
 
-- `col(...)` / `row(...)`：纵向 / 横向排列。
-- `section("名字", ...)`：带名字的组 = 一个框，名字是标注（渲染成紧贴框顶的小标签）。**每个页面的顶层板块都要有名字。**
-- `accent(node)`：强调色。
+- `col(...)` / `row(...)` / `grid(...)`：纵向 / 横向 / 横向折行等分。
+- `section("名字", ...)`：带名字的组 = 一个框，名字是标注。**每个页面的顶层板块都要有名字。**
+- `card(...)` 一张有框的卡片；`pair(名, 值)` 字段表的一行；`accent(node)` 强调色；`ruled(node)` 孩子之间有分隔线。
 - `span(份数, node)`：一行里的相对宽度，如 `row(span(1, filters("a")), span(3, collection("t")))`。是份数，不是像素。
-- **没有 hero / 卡片 / 网格这类变体。** 经典布局是原子的组合：Hero = `row(col(text(1), text(2), row(action(), action())), image())`。
-  想复用就在配置里写函数。组嵌套超过 4 层会警告。
+- `steps(...)`：**孩子有顺序**（流程）。结构里只声明“顺序有意义”，序号和连接线由引擎画。
+- 没有 hero / 卡片网格 / 对比表 这类变体：经典布局是这些的组合；想复用就在配置里写函数。嵌套超过 5 层会警告。
+
+### 生成：`each(来源, 每一项怎么画, {as?, dir?, seq?, rule?})`
+
+每一项在模板里叫 `as`（默认 `it`）；模板里用 `bind("x.字段")` 取值，**嵌套的 each 要起不同的名字**。
+
+| 来源 | 逐项生成什么 | 每一项有 |
+|---|---|---|
+| `records("类型", {where?, limit?, notSelf?})` | 某类型的记录（`where` 的值：`":param"` 路由参数、`"$field"` 页面记录的字段、字面量） | 这条记录的字段，`@title` = 显示名。`item` 可以不写：用那个类型的 `card`（没有就是 图 + 显示名），并链到详情页 |
+| `fields({of?, type?, only?, skip?})` | 一条记录的字段（默认当前记录；kv 列表展开成一行行参数） | `label` `value` `field`。客户页不摆空字段，整块都空时把字段名全摆出来，值是波浪线。`type` 不带 `of` = 只要字段名（对比表的行头） |
+| `items("字段")` | 一个多值字段的各项：term/ref → 对方的记录；media → 图片；list → 每一行 | 对应的记录 / 图 / 行 |
+
+**bind 路径**：`字段`（当前记录）、`变量.字段`、`变量.@title`（显示名）、`变量.{另一变量.field}`（字段名本身来自数据）。页面记录（详情页）的变量叫 `page`，也是“当前记录”。
+**count**：`text(2, count(records("product", {where: {category: ":id"}})))` = 本分类的型号数。
+
+### 简写（DSL 里都只是几行 each）
+
+```ts
+collection(type, opts)  = each(records(type, opts), undefined, { dir: "grid" })
+facts({only?, skip?})   = each(fields(opts), pair(text(3, bind("e.label")), text(3, bind("e.value"))), { as: "e", rule: true })
+badges(field)           = each(items(field), text(3, bind("it.@title"), { circle: true }), { dir: "row" })
+gallery(field)          = each(items(field), image(bind("it")), { dir: "row" })
+compare(type, 字段[], {where?, limit?})        // 对比表：外层逐个字段（行），内层逐条记录（列）
+  = each(fields({type, only}), row(text(bind("f.label")), each(records(type,…), text(bind("p.{f.field}")), {as:"p", dir:"row"})), {as:"f", rule:true})
+```
+
+没填的一律是粗波浪线（见下）。`facts` 想分成几个板块，就每个板块写自己的 `only`，别重复同一个 `facts()`。
 
 ### 没填的一律是粗波浪线
 
-槽没写 `fill`、`bind` 的字段在这条记录上没有值（比如显示名留空、只留主键）、`kv` 参数行没有值，都画成粗波浪线（“此处有文字”）。一个 `facts` 里字段全是空的，也不会只剩一条光秃秃的线：字段名都摆出来，值是波浪线。**宁可波浪线，也不要编数据**——客户不会纠结，seed 也不用造。
-`locale`（顶层）：`"zh"`（默认）或 `"en"`——引擎自带、客户会看到的文案（面包屑、空状态、“更多”、菜单、清除筛选、公开表单的按钮和提示）用哪种语言。**英文站必须写 `locale: "en"`**，否则这些会是中文；体检会提醒。后台（`#/_model`）始终是中文。
+槽没写 `fill`、`bind` 的字段在这条记录上没有值（比如显示名留空、只留主键）、`kv` 参数行没有值，都画成粗波浪线（“此处有文字”）。
+`locale`（顶层）：`"zh"`（默认）或 `"en"`——引擎自带、客户会看到的文案（面包屑、空状态、“更多”、菜单、清除筛选、公开表单的按钮和提示）用哪种语言。**英文站必须写 `locale: "en"`**；体检会提醒。后台（`#/_model`）始终是中文。
 `fidelity`（顶层）：`"words"`（默认）= 写了的文案照写；`"lines"` = 所有文案（含取自模型的值）都画成线条，只表达结构。
 
 ## 模型（数据结构，照 zeroY 的 shape 词汇）
@@ -112,8 +141,9 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 
 ## 现在表达不了的（别硬凑）
 
-- **对比表**（如“越南 vs 中国”两栏逐项对照）：现在只能写成两列文字；
-- **有顺序的流程**（第 1 步、第 2 步……）：集合是卡片网格，没有序号；
-- **把当前记录带进表单**的“报价”按钮：现在只是一个普通链接。
+按“生成空间”的边界，剩下的是这几类，遇到时用最接近的写法并在配置里注明，不要为它们另造槽：
 
-这几条是已知缺口，遇到时用最接近的写法并在配置里注明，不要为它们另造槽。
+- **只活在内存里的页面内状态**：标签页、手风琴、轮播、多步向导。状态能放进地址（`?tab=2`）的才是环境的一部分——目前还没有“按地址里的值切换显示哪个孩子”的节点；
+- **计数之外的计算**：总和、平均、“还剩 N 天”。目前只有 `count`；
+- **内容本身是一棵树**：一篇带小标题和嵌入的文章。现在文章正文只能是一段文字字段；
+- **用户相关**：登录、个性化、权限。草图没有“用户”这个维度，这是有意的。

@@ -6,6 +6,7 @@
  */
 import { Data, Effect } from "effect";
 import { checkSketch } from "../shared/check.ts";
+import { upgradeStored } from "../shared/migrate.ts";
 import { nowSeconds } from "./clock.ts";
 import { Db, num, str } from "./db.ts";
 
@@ -153,7 +154,11 @@ export const get = (code: string, version?: number) =>
       want,
     ]);
     if (!v) return yield* new SketchNotFound({ what: `${slug} v${want}` });
-    return { ...meta(r), shown: want, sketch: JSON.parse(str(v, "json")) as unknown };
+    return {
+      ...meta(r),
+      shown: want,
+      sketch: JSON.parse(upgradeStored(str(v, "json"))) as unknown,
+    };
   });
 
 export const versions = (code: string) =>
@@ -234,7 +239,7 @@ export const serve = (slug: string, key: string, version?: number) =>
       [version ?? null, slug],
     );
     if (!r || num(r, "deleted_at") > 0 || !sameKey(str(r, "key"), key)) return null;
-    return str(r, "json");
+    return upgradeStored(str(r, "json"));
   });
 
 /** 首页上唯一出现的草图：范例（虚构的）。库里没有或没上线 = null。 */

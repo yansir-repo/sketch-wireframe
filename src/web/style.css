@@ -145,7 +145,7 @@ a {
   min-width: 0;
 }
 .grp.row > .btn,
-.grp.row > .badges,
+.grp.row > .circle,
 .grp.row > .pills {
   flex: 0 0 auto;
 }
@@ -268,11 +268,6 @@ a {
   border-bottom: 3px solid var(--accent);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 14px;
-}
 .card {
   display: flex;
   flex-direction: column;
@@ -295,38 +290,6 @@ a {
   margin-top: 8px;
 }
 
-.facts {
-  width: 100%;
-  border-top: 3px solid var(--ink);
-  border-radius: 2px;
-}
-.fact {
-  display: flex;
-  align-items: stretch;
-  font-size: 16px;
-  background: var(--rowline) left bottom / 100% 6px no-repeat;
-}
-.fact .k {
-  width: 150px;
-  flex-shrink: 0;
-  color: var(--pencil);
-  background: #f3ecd9;
-  padding: 11px 12px;
-  border-right: 2px solid var(--pencil);
-  border-radius: 0 3px 3px 0;
-}
-.fact .v {
-  padding: 11px 14px;
-  flex: 1;
-  display: flex;
-  align-items: center;
-}
-
-.badges {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
 .circle {
   display: inline-flex;
   align-items: center;
@@ -350,11 +313,6 @@ a {
   font-size: 14px;
 }
 
-.gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px;
-}
 .thumb {
   display: block;
 }
@@ -765,21 +723,121 @@ dialog .actions {
 .coll {
   min-width: 0;
 }
-.coll .grid {
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-}
-.facts .items {
-  margin: 0;
-  padding-left: 1.1em;
-}
-.facts .items li {
-  margin: 2px 0;
-}
-.facts a {
-  text-decoration: underline;
-  text-decoration-style: dotted;
-}
 
 .grp.row > .brand {
   flex: 0 0 auto;
+}
+
+/* ---- 排列：grid、卡片、字段对、分隔线、流程 ---- */
+.grp.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.grp.grid > * {
+  min-width: 0;
+}
+.grp.row > .thumb {
+  flex: 0 0 150px;
+}
+.grp.ruled {
+  gap: 0;
+  border-top: 3px solid var(--ink);
+  border-radius: 2px;
+}
+.grp.ruled > * {
+  background: var(--rowline) left bottom / 100% 6px no-repeat;
+}
+.grp.pair {
+  flex-wrap: nowrap;
+  gap: 0;
+  align-items: stretch;
+  font-size: 16px;
+}
+.grp.pair > :first-child {
+  flex: 0 0 150px;
+  color: var(--pencil);
+  background: #f3ecd9;
+  padding: 11px 12px;
+  border-right: 2px solid var(--pencil);
+  border-radius: 0 3px 3px 0;
+}
+.grp.pair > :last-child {
+  padding: 11px 14px;
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+}
+.tx .items {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.tx .items li {
+  margin: 2px 0;
+}
+.tx a {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+/* 对比表：行头 | 一格一条记录 */
+.grp.ruled > .grp.row {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.grp.ruled > .grp.row > :first-child {
+  flex: 0 0 150px;
+  color: var(--pencil);
+  padding: 11px 12px;
+}
+.grp.ruled > .grp.row > .grp.row {
+  flex: 1 1 0;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+.grp.ruled > .grp.row > .grp.row > * {
+  padding: 11px 14px;
+  flex: 1 1 0;
+}
+/* 流程：序号 + 连接线 */
+.grp.seq {
+  gap: 6px;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+.grp.seq > .stepsep {
+  flex: none;
+}
+.grp.seq > .step {
+  flex: 1 1 0;
+}
+.step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.grp.seq.col > .step {
+  flex: none;
+  width: 100%;
+}
+.stepno {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+}
+.stepbody {
+  flex: 1;
+  min-width: 0;
+}
+.stepsep {
+  align-self: center;
+  flex: none;
+  color: var(--pencil);
+  font-size: 22px;
 }

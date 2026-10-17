@@ -2,11 +2,11 @@
  * 体检里“不算错、但多半是设计问题”的那一类：不拦发布，会出现在 warnings 里。
  * 它们都是在回答同一个问题——这份草图作为“客户要看的东西”靠不靠谱：
  * 字段有没有真的被展示、导航是不是太长、板块是不是重复、数据够不够演示、站是不是英文却没设 locale。
- * 引擎怎么渲染是引擎的事；这里只读 Sketch，纯函数。
+ * 引擎怎么渲染是引擎的事；这里只读 Sketch（连同每个节点处的环境），纯函数。
  */
 import { pagesOf } from "./derive.ts";
-import { factFields } from "./facts.ts";
 import type { Node, Sketch } from "./schema.ts";
+import { pageScope, resolveStatic, walkTree, withVar, type Scope } from "./scope.ts";
 import { matchesWhere } from "./where.ts";
 
 const MAX_NAV = 7;
@@ -16,25 +16,18 @@ const MAX_SECTIONS = 9;
 /** 看着像后台流程的字段名：出现在客户页上多半是漏标了 internal。 */
 const BACK_OFFICE = /(verif|reviewer|reviewed|claim_status|approv|internal|workflow|last_checked)/i;
 
-type Walk = (n: Node, ctxType: string | undefined, at: string) => void;
-
-const walkNodes = (n: Node, ctxType: string | undefined, at: string, visit: Walk): void => {
-  visit(n, ctxType, at);
-  if ("group" in n) n.group.forEach((c, i) => walkNodes(c, ctxType, `${at}.group[${i}]`, visit));
-};
-
 const textsOf = (s: Sketch): string[] => {
   const out: string[] = [];
   const grab = (n: Node) => {
-    if (!("group" in n) && "fill" in n && typeof n.fill === "string") out.push(n.fill);
+    if (!("group" in n) && !("each" in n) && "fill" in n && typeof n.fill === "string")
+      out.push(n.fill);
   };
-  const pages = pagesOf(s);
-  for (const p of Object.values(pages)) {
+  for (const p of Object.values(pagesOf(s))) {
     if (p.name) out.push(p.name);
-    for (const b of p.body) walkNodes(b, undefined, "", grab);
+    for (const b of p.body) walkTree(s, b, pageScope(undefined), "", grab);
   }
-  walkNodes(s.header, undefined, "", grab);
-  walkNodes(s.footer, undefined, "", grab);
+  walkTree(s, s.header, pageScope(undefined), "", grab);
+  walkTree(s, s.footer, pageScope(undefined), "", grab);
   return out;
 };
 
@@ -48,28 +41,89 @@ export const qualityWarnings = (s: Sketch): string[] => {
   const mark = (type: string | undefined, field: string) => {
     if (!type) return;
     if (!shown.has(type)) shown.set(type, new Set());
-    shown.get(type)!.add(field.split(".")[0]!);
+    shown.get(type)!.add(field);
   };
-  const visitShown: Walk = (n, type) => {
-    if ("group" in n) return;
-    if (
-      (n.slot === "text" || n.slot === "image" || n.slot === "action" || n.slot === "brand") &&
-      n.fill &&
-      typeof n.fill === "object"
-    )
-      mark(type, n.fill.bind);
-    if (n.slot === "badges" || n.slot === "gallery") mark(type, n.field);
-    if (n.slot === "filters") for (const f of n.fields) mark(type, f);
-    if (n.slot === "facts" && type) for (const f of factFields(s, type, n)) mark(type, f);
+  const markBind = (path: string, scope: Scope) => {
+    const r = resolveStatic(s, scope, path);
+    if (!r.ok) return;
+    const t = r.target;
+    if (t.kind === "field") mark(t.type, t.field);
+    else if (t.kind === "fields") t.names.forEach((n) => mark(t.type, n));
+    else if (t.kind === "entry-value") t.names.forEach((n) => mark(t.type, n));
+    else if (t.kind === "title") {
+      const def = s.model[t.type];
+      if (def) mark(t.type, def.title ?? def.key);
+    }
   };
+  const visitShown =
+    (listType: string | undefined) =>
+    (n: Node, scope: Scope): void => {
+      if ("group" in n) return;
+      if ("each" in n) {
+        const src = n.each;
+        if ("fields" in src) {
+          const v = scope.vars.get(src.fields.of ?? scope.it ?? "");
+          const type = src.fields.type ?? (v?.kind === "record" ? v.type : undefined);
+          for (const name of type ? (resolveNames(type, src) ?? []) : []) mark(type, name);
+        }
+        if ("items" in src) markBind(src.items, scope);
+        return;
+      }
+      const fillBind = (f: unknown) => {
+        if (f && typeof f === "object" && "bind" in f)
+          markBind((f as { bind: string }).bind, scope);
+      };
+      if (n.slot === "text" || n.slot === "image" || n.slot === "action" || n.slot === "brand")
+        fillBind(n.fill);
+      if (n.slot === "action") for (const v of Object.values(n.with ?? {})) fillBind(v);
+      if (n.slot === "filters") {
+        const page = scope.vars.get("page");
+        const type = listType ?? (page?.kind === "record" ? page.type : undefined);
+        for (const f of n.fields) mark(type, f);
+      }
+    };
+  const resolveNames = (
+    type: string,
+    src: { fields: { only?: ReadonlyArray<string>; skip?: ReadonlyArray<string> } },
+  ) => {
+    const def = s.model[type];
+    if (!def) return undefined;
+    const title = def.title ?? def.key;
+    if (src.fields.only)
+      return src.fields.only.filter(
+        (n) => def.fields[n] && def.fields[n]!.internal !== true && def.fields[n]!.kind !== "media",
+      );
+    return Object.entries(def.fields)
+      .filter(
+        ([n, fd]) =>
+          n !== def.key &&
+          n !== title &&
+          fd.kind !== "media" &&
+          fd.detail !== false &&
+          fd.internal !== true &&
+          !(src.fields.skip ?? []).includes(n),
+      )
+      .map(([n]) => n);
+  };
+
   for (const [pattern, page] of Object.entries(pages)) {
     const c = page.ctx;
-    const type = c && !c.many && !c.create ? c.type : undefined;
-    page.body.forEach((b, i) => walkNodes(b, type, `pages["${pattern}"].body[${i}]`, visitShown));
+    const recordType = c && !c.many && !c.create ? c.type : undefined;
+    const listType = c?.many ? c.type : undefined;
+    page.body.forEach((b, i) =>
+      walkTree(s, b, pageScope(recordType), `pages["${pattern}"].body[${i}]`, visitShown(listType)),
+    );
   }
   for (const [t, def] of Object.entries(s.model)) {
-    if (def.card) walkNodes(def.card, t, `model.${t}.card`, visitShown);
-    // 列表里的集合卡片（没写 card 时是 图 + 显示名）也算展示了显示名
+    if (def.card)
+      walkTree(
+        s,
+        def.card,
+        withVar({ vars: new Map(), it: undefined }, "it", { kind: "record", type: t }),
+        `model.${t}.card`,
+        visitShown(undefined),
+      );
+    // 列表里的集合卡片（没写 card 时是 图 + 显示名）也算展示了显示名；主键在地址里
     mark(t, def.title ?? def.key);
     mark(t, def.key);
   }
@@ -128,58 +182,58 @@ export const qualityWarnings = (s: Sketch): string[] => {
     const c = page.ctx;
     const type = c && !c.many && !c.create ? c.type : undefined;
     if (!type) continue;
-    // 同一页里两个 facts 显示完全一样的字段 = 重复板块
     const seen = new Map<string, string>();
     page.body.forEach((b, i) =>
-      walkNodes(b, type, `${at}.body[${i}]`, (n, _t, where) => {
-        if ("group" in n || n.slot !== "facts") return;
-        const key = factFields(s, type, n).join("|");
-        if (!key) return;
-        const prev = seen.get(key);
-        if (prev)
-          warn(where, `和 ${prev} 的 facts 显示完全相同的字段：用 only 把字段分给不同的板块`);
-        else seen.set(key, where);
-      }),
-    );
-    // 详情页里没有 where 的集合：显示的是“所有”，不是“相关的”
-    page.body.forEach((b, i) =>
-      walkNodes(b, type, `${at}.body[${i}]`, (n, _t, where) => {
-        if ("group" in n || n.slot !== "collection") return;
-        if (n.where && Object.values(n.where).some((v) => v.startsWith("$"))) {
-          // 关系查询在每一条种子记录上都查不到东西 = 这个板块在演示里永远是空的：种子要让相关的记录真的互相关联
-          const own = s.model[type]!;
-          const target = s.model[n.type];
-          const visible = (r: Record<string, unknown>) =>
-            !Object.entries(target?.unlisted ?? {}).some(([f, v]) => r[f] === v);
-          if (target && own.seed.length > 0) {
-            const hits = own.seed.map(
-              (rec) =>
-                target.seed.filter(
-                  (r) =>
-                    visible(r) &&
-                    matchesWhere(r, n.where, { params: {}, record: rec }) &&
-                    !(n.notSelf && n.type === type && r[own.key] === rec[own.key]),
-                ).length,
+      walkTree(s, b, pageScope(type), `${at}.body[${i}]`, (n, scope, where) => {
+        if ("group" in n || !("each" in n)) return;
+        const src = n.each;
+        // 同一页里两个 fields 显示完全一样的字段 = 重复板块
+        if ("fields" in src) {
+          const v = scope.vars.get(src.fields.of ?? scope.it ?? "");
+          const t = src.fields.type ?? (v?.kind === "record" ? v.type : undefined);
+          const key = `${t}:${(t ? (resolveNames(t, src) ?? []) : []).join("|")}`;
+          if (key.endsWith(":")) return;
+          const prev = seen.get(key);
+          if (prev) warn(where, `和 ${prev} 显示完全相同的字段：用 only 把字段分给不同的板块`);
+          else seen.set(key, where);
+        }
+        if ("records" in src) {
+          if (!src.where)
+            warn(
+              where,
+              `详情页里的 ${src.records} 集合没有 where：显示的是所有记录，不是“相关的”——用 where 指向关系字段（ref / term）`,
             );
-            if (hits.every((h) => h === 0))
-              warn(
-                where,
-                `${n.type} 集合的 where 在每一条 ${type} 种子记录上都查不到记录：这个板块演示时永远是空的——种子里要让相关的记录真的互相关联（每个分组至少两条）`,
+          else if (Object.values(src.where).some((v) => v.startsWith("$"))) {
+            // 关系查询在每一条种子记录上都查不到东西 = 这个板块在演示里永远是空的
+            const own = s.model[type]!;
+            const target = s.model[src.records];
+            const visible = (r: Record<string, unknown>) =>
+              !Object.entries(target?.unlisted ?? {}).some(([f, v]) => r[f] === v);
+            if (target && own.seed.length > 0) {
+              const hits = own.seed.map(
+                (rec) =>
+                  target.seed.filter(
+                    (r) =>
+                      visible(r) &&
+                      matchesWhere(r, src.where, { params: {}, record: rec }) &&
+                      !(src.notSelf && src.records === type && r[own.key] === rec[own.key]),
+                  ).length,
               );
+              if (hits.every((h) => h === 0))
+                warn(
+                  where,
+                  `${src.records} 集合的 where 在每一条 ${type} 种子记录上都查不到记录：这个板块演示时永远是空的——种子里要让相关的记录真的互相关联（每个分组至少两条）`,
+                );
+            }
           }
         }
-        if (!n.where)
-          warn(
-            where,
-            `详情页里的 ${n.type} 集合没有 where：显示的是所有记录，不是“相关的”——用 where 指向关系字段（ref / term）`,
-          );
       }),
     );
   }
 
   // ---- 页眉 ----
-  walkNodes(s.header, undefined, "header", (n, _t, where) => {
-    if (!("group" in n) && n.slot === "nav" && n.paths.length > MAX_NAV)
+  walkTree(s, s.header, pageScope(undefined), "header", (n, _scope, where) => {
+    if (!("group" in n) && !("each" in n) && n.slot === "nav" && n.paths.length > MAX_NAV)
       warn(
         where,
         `导航有 ${n.paths.length} 项（>${MAX_NAV}）：引擎会把它收进菜单，但这说明信息架构该合并或分组了`,
@@ -187,7 +241,7 @@ export const qualityWarnings = (s: Sketch): string[] => {
   });
   const firstLeaf = (n: Node): Node => ("group" in n && n.group[0] ? firstLeaf(n.group[0]) : n);
   const lead = firstLeaf(s.header);
-  if (!("group" in lead) && lead.slot === "action" && lead.to === "/")
+  if (!("group" in lead) && !("each" in lead) && lead.slot === "action" && lead.to === "/")
     warn(
       "header",
       '页眉第一个东西是回首页的 action：它会渲染成一个按钮。logo/字标用 brand()（或 image("LOGO")）',

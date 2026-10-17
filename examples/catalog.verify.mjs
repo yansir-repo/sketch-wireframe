@@ -64,7 +64,7 @@ export default async function flow({ page, go, sleep, check, load }) {
 
   // ---- 客户页：用上了后台填的东西 ----
   await go(`#/product/${CODE}`);
-  const facts = await page.$$eval(".fact", (r) => r.map((e) => e.textContent.trim()));
+  const facts = await page.$$eval(".grp.pair", (r) => r.map((e) => e.textContent.trim()));
   check(
     "详情页显示后台填的参数行",
     facts.some((s) => s.includes("尺寸") && s.includes("30cm")),
@@ -74,8 +74,8 @@ export default async function flow({ page, go, sleep, check, load }) {
     "没填值的参数行存在（显示为波浪线，不是“待填写”）",
     facts.length >= 1 && !facts.some((s) => s.includes("待填写")),
   );
-  check("图库显示真实上传的照片", (await count(".gallery .xbox.has-img")) === 1);
-  await page.click('.gallery [data-act="view"]');
+  check("图库显示真实上传的照片", (await count(".thumb .xbox.has-img")) === 1);
+  await page.click('.thumb[data-act="view"]');
   await sleep(500);
   const viewer = await ev(() => ({
     open: document.querySelector("#viewer-root dialog").open,
@@ -88,6 +88,31 @@ export default async function flow({ page, go, sleep, check, load }) {
   );
   await ev(() => document.querySelector("#viewer-root [data-dialog-close]").click());
   await sleep(500);
+
+  // ---- 生成器的三个用法：对比表、有序流程、带上下文的链接 ----
+  await go("#/compare");
+  const cmp = await ev(() => ({
+    rows: document.querySelectorAll(".grp.ruled > .grp.row").length,
+    cells: document.querySelectorAll(".grp.ruled > .grp.row:first-child .grp.row > *").length,
+  }));
+  check(
+    "对比表：每个字段一行，每条记录一格",
+    cmp.rows === 3 && cmp.cells === 3,
+    JSON.stringify(cmp),
+  );
+  await go("#/");
+  const flow = await ev(() => ({
+    no: document.querySelectorAll(".stepno").length,
+    sep: document.querySelectorAll(".stepsep").length,
+  }));
+  check("流程：序号和连接线由引擎画", flow.no === 4 && flow.sep === 3, JSON.stringify(flow));
+  await go("#/product/P102");
+  await page.click('a[href*="/inquiry?product="]');
+  await sleep(500);
+  const prefilled = await page.$eval('[data-field="product"] wired-combo', (el) => el.selected);
+  check("带上下文的链接：报价表单里“意向型号”已选好", prefilled === "P102", String(prefilled));
+  await go("#/category/pens");
+  check("count：分类页显示本分类的型号数", await ev(() => document.body.textContent.includes("5")));
 
   // ---- 客户页筛选：并集/交集、地址即状态、清除 ----
   await go("#/product");
