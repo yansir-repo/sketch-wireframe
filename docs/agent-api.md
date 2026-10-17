@@ -22,11 +22,12 @@ claude mcp add --transport http sketch-admin https://sketch-wireframe.yansir.wor
 | `describe_format` | 草图格式：语法（槽、组、模型、页面）、规则、红线 + JSON Schema。**先读它** |
 | `get_example` | 一份完整有效的范例（Sketch JSON + 它的 TS 配置源码） |
 | `check_sketch {sketch}` | 不发布，体检：结构（Schema）、语义（引用/路由/seed）、公开预览红线（价格/密码/令牌）。返回 `ok`、`errors`、`warnings` |
-| `publish_sketch {sketch}` 🔒 | 体检通过才发布，返回 `url`（`/s/<code>.<key>`）。同一编号永远同一个地址；内容没变不加版本 |
-| `list_sketches` 🔒 | 所有已发布草图：地址、版本、谁最后改的 |
-| `get_sketch {code}` 🔒 | 元数据 + 当前对外的 JSON |
-| `sketch_versions {code}` 🔒 | 版本历史 |
-| `rollback_sketch {code, version}` 🔒 | 回到某个旧版本（地址不变） |
+| `publish_sketch {sketch, live?}` 🔒 | 体检通过才存成新版本，返回 `url`（`/s/<code>.<key>`）。`live` 默认 true = 立刻上线；`live:false` = **只暂存**：正在对外的版本不变，预览地址 `<url>?v=<版本>` 能看。同一编号永远同一个地址；内容和最新版本一样不加版本 |
+| `verify_sketch {code, version?}` 🔒 | 在线上真浏览器（Cloudflare Browser Rendering）里把整站点一遍：每个路由能渲染、无坏链、手绘层画出来、板块有标签、**线条档零文案**、控制台零报错。`version` 默认是对外的那版，暂存的也行。项目自己的流程要本机 Chrome（`verify.ts --flow`） |
+| `promote_sketch {code, version}` 🔒 | 让某个版本成为对外的版本——上线暂存的，或退回旧版本，是同一个动作（地址不变） |
+| `list_sketches` 🔒 | 所有草图：地址、对外的版本（`live:false` = 只暂存过）、谁最后改的 |
+| `get_sketch {code, version?}` 🔒 | 元数据 + JSON（默认对外的那版，也可指定暂存的） |
+| `sketch_versions {code}` 🔒 | 版本历史，标出哪个在对外 |
 | `remove_sketch {code}` 🔒 | 下线：地址立刻失效，历史保留；再发布同一编号会复活原地址 |
 | `rotate_key {code}` 🔒 | 换 key：旧链接立刻失效（链接泄露时用） |
 
@@ -35,7 +36,8 @@ claude mcp add --transport http sketch-admin https://sketch-wireframe.yansir.wor
 1. `describe_format` → `get_example`
 2. 写草图（直接写 JSON，或写 TS 配置再用命令行 `build` 求值）
 3. `check_sketch` 直到 `ok`
-4. 🔒 `publish_sketch` → 把 `url` 发给客户；改了再发布一次，地址不变
+4. 🔒 `publish_sketch {live:false}` → `verify_sketch`（线上真浏览器）→ 通过了 `promote_sketch` → 把 `url` 发给客户；改了再来一遍，地址不变
+   （命令行的 `ship` 就是这四步；验证不过，对外的版本一点没变）
 
 ## 2. 命令行
 
@@ -45,8 +47,8 @@ node scripts/do.ts describe_format
 node scripts/do.ts get_example
 node scripts/do.ts build my.config.ts [--out f.json]  # TS 配置 → Sketch JSON（本地）
 node scripts/do.ts check my.config.ts                 # 同一份体检（本地，不联网）
-node scripts/do.ts publish my.config.ts               # 体检 → publish_sketch
-node scripts/do.ts ship my.config.ts [--flow f.mjs]   # 体检 → 发布 → 在真 Chrome 里把线上地址点一遍
+node scripts/do.ts publish my.config.ts               # 体检 → publish_sketch（立刻上线）
+node scripts/do.ts ship my.config.ts [--flow f.mjs]   # 体检 → 暂存 → 在预览地址上验证（线上浏览器；--flow 或本机 dev 时用本机 Chrome）→ 通过才上线
 node scripts/do.ts audit                              # 用本地代码重新体检线上每一份草图（部署前自动跑）
 node scripts/do.ts list_sketches | get_sketch '{"code":"EX-CATALOG"}' | remove_sketch … | rotate_key … | rollback_sketch …
 ```
@@ -58,5 +60,11 @@ node scripts/do.ts list_sketches | get_sketch '{"code":"EX-CATALOG"}' | remove_s
 
 ## 3. 验证
 
-`node scripts/verify.ts <草图地址> [--flow 流程脚本]`：真 Chrome（`CHROME_PATH` 可指定）里把整站点一遍——每个路由能渲染、无坏链、手绘层画出来、板块都有标签、
-**线条档零文案**、客户页没有工具条/后台入口、数据结构图画出了箭头、控制台零报错；再跑项目自己的流程（增删改、上传、筛选、分页、提交）。范例流程：`examples/catalog.verify.mjs`。
+两处，**同一份检查**（`src/verify/core.ts`）：
+
+- **线上**：`verify_sketch`，Cloudflare Browser Rendering 里的真浏览器；不需要本机装 Chrome。`ship` 默认用它，在**预览版本**上跑（`?v=`），通过才 promote。
+- **本机**：`node scripts/verify.ts <草图地址[?v=版本]> [--flow 流程脚本]`，真 Chrome（`CHROME_PATH` 可指定）。项目自己的流程（增删改、上传、筛选、分页、提交）是本机文件，只能在这里跑。范例：`examples/catalog.verify.mjs`。本机 `vp dev` 没有 Browser Rendering，`ship` 会自动改用本机 Chrome。
+
+检查内容：每个路由能渲染、无坏链、手绘层画出来、板块都有标签、**线条档零文案**、客户页没有工具条/后台入口、数据结构图画出了箭头、手机宽度无溢出、控制台零报错。
+
+预览地址（`?v=`）和对外地址用同一个 key：拿到 key 的人能看到暂存的版本。key 只发给客户本人；不想让客户看到暂存内容时，别把 key 发出去之前先暂存草稿。

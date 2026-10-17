@@ -49,6 +49,7 @@ export default defineConfig({
           "tsc --noEmit -p src/worker",
           "tsc --noEmit -p src/worker/test",
           "tsc --noEmit -p src/shared",
+          "tsc --noEmit -p src/verify",
           "vp run check:scripts",
         ],
         cache: false,

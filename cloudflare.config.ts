@@ -23,6 +23,8 @@ export default defineConfig((ctx) => ({
       DB: bindings.d1({ name: "sketch-wireframe", id: "99c00e0d-5883-4406-8d9f-38538dad0e65" }),
       // The engine bundle as a binding: the Worker serves its shell after a sketch's key checks out.
       ASSETS: bindings.assets(),
+      // Browser Rendering for verify_sketch. Remote-only; locally `scripts/verify.ts` drives a local Chrome instead.
+      ...(ctx.mode === "development" ? {} : { BROWSER: bindings.browser() }),
       // Cloudflare Access application gating /admin/*. The Worker verifies the forwarded JWT again (src/worker/access.ts).
       ACCESS_TEAM_DOMAIN: bindings.text("nosunthx.cloudflareaccess.com"),
       ACCESS_AUD: bindings.text("d3027610c14287786ad5bb36242a327b9ab567a93ef1b438da9b7cf4bc760b8d"),

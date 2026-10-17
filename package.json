@@ -6,6 +6,7 @@
     "postinstall": "node scripts/effect/install-compiler.mjs && node scripts/hooks-install.mjs"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
     "effect": "catalog:",
     "roughjs": "4.6.6",
     "wired-checkbox": "2.1.0",

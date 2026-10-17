@@ -12,6 +12,7 @@ import { env } from "cloudflare:workers";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { AccessVerifierLive } from "./access.ts";
+import { BrowserLive } from "./browser.ts";
 import { DbLive, type D1Like } from "./db.ts";
 import { handleMcp } from "./mcp.ts";
 import { parseSketchPath, serve } from "./sketches.ts";
@@ -23,11 +24,12 @@ const Verifier = AccessVerifierLive({
 });
 
 const ServicesLive = (db: D1Like) =>
-  Layer.mergeAll(DbLive(db), Verifier, LocalUserLive(env.DEV_USER_EMAIL));
+  Layer.mergeAll(DbLive(db), Verifier, LocalUserLive(env.DEV_USER_EMAIL), BrowserLive(env.BROWSER));
 
 const NOT_FOUND = () =>
   HttpServerResponse.text("没有这个草图", { status: 404, headers: { "x-robots-tag": "noindex" } });
-const PRIVATE = { "cache-control": "private, max-age=60", "x-robots-tag": "noindex" } as const;
+// no-cache: a sketch can be promoted or rolled back at any moment; the payload is small, so always revalidate.
+const PRIVATE = { "cache-control": "private, no-cache", "x-robots-tag": "noindex" } as const;
 
 /** The gate is the key in the path; right and wrong answers look the same from outside. */
 const sketchRoute = (db: D1Like) =>
@@ -39,7 +41,12 @@ const sketchRoute = (db: D1Like) =>
       const url = new URL(request.url, "http://x");
       const parts = parseSketchPath(url.pathname);
       if (!parts) return NOT_FOUND();
-      const json = yield* serve(parts.slug, parts.key).pipe(Effect.provide(ServicesLive(db)));
+      // ?v=<n> previews a specific (possibly not yet live) version; the key is still the gate.
+      const v = Number(url.searchParams.get("v"));
+      const version = Number.isInteger(v) && v > 0 ? v : undefined;
+      const json = yield* serve(parts.slug, parts.key, version).pipe(
+        Effect.provide(ServicesLive(db)),
+      );
       if (json === null) return NOT_FOUND();
       if (parts.json)
         return HttpServerResponse.text(json, { contentType: "application/json", headers: PRIVATE });

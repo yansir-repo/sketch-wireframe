@@ -51,6 +51,8 @@ export type Meta = {
   readonly updatedAt: number;
   readonly updatedBy: string;
   readonly deleted: boolean;
+  /** 有没有已上线的版本：只暂存过（stage）还没 promote 的草图，version 为 0，公开地址 404。 */
+  readonly live: boolean;
 };
 
 const meta = (r: Readonly<Record<string, unknown>>): Meta => ({
@@ -62,6 +64,7 @@ const meta = (r: Readonly<Record<string, unknown>>): Meta => ({
   updatedAt: num(r, "updated_at"),
   updatedBy: str(r, "updated_by"),
   deleted: num(r, "deleted_at") > 0,
+  live: num(r, "version") > 0 && !(num(r, "deleted_at") > 0),
 });
 
 const row = (slug: string) =>
@@ -77,9 +80,15 @@ const live = (slug: string) =>
     return r;
   });
 
-/** 校验 → 写成新版本（内容没变就不加版本）。key 第一次发布时铸，之后永远复用；下线后重新发布也还是原来那个。 */
-export const publish = (input: unknown, actor: string) =>
+/**
+ * 校验 → 写成新版本（内容和**最新版本**一样就不加版本）。key 第一次出现时铸，之后永远复用；下线后重新发布也还是原来那个。
+ *
+ * `live: true`（默认）= 写完立刻上线；`live: false` = 只暂存：版本存进去，公开地址 `?v=<版本>` 能预览它，
+ * 但正在对外的版本不变（新草图则还没有对外的版本）。“验证通过才上线”就是 stage → 验证 → promote。
+ */
+export const publish = (input: unknown, actor: string, options: { readonly live?: boolean } = {}) =>
   Effect.gen(function* () {
+    const goLive = options.live !== false;
     const report = checkSketch(input);
     if (!report.ok || !report.sketch)
       return yield* new SketchInvalid({ errors: report.errors, message: report.errors.join("\n") });
@@ -90,36 +99,37 @@ export const publish = (input: unknown, actor: string) =>
     const now = yield* nowSeconds;
     const existing = yield* row(slug);
 
-    if (existing && num(existing, "deleted_at") === 0) {
-      const current = yield* db.first(
-        "SELECT json FROM sketch_versions WHERE code = ? AND version = ?",
-        [slug, num(existing, "version")],
-      );
-      if (current && str(current, "json") === json)
-        return { ...meta(existing), unchanged: true, warnings: report.warnings };
-    }
-    const top = yield* db.first("SELECT MAX(version) AS v FROM sketch_versions WHERE code = ?", [
-      slug,
-    ]);
-    const version = (top ? num(top, "v") : 0) + 1;
-    yield* db.run(
-      "INSERT INTO sketch_versions (code, version, json, created_at, created_by) VALUES (?, ?, ?, ?, ?)",
-      [slug, version, json, now, actor],
+    const top = yield* db.first(
+      "SELECT v.version AS version, v.json AS json FROM sketch_versions v WHERE v.code = ? ORDER BY v.version DESC LIMIT 1",
+      [slug],
     );
-    if (existing) {
+    const sameAsLatest = top !== undefined && str(top, "json") === json;
+    const version = sameAsLatest ? num(top, "version") : (top ? num(top, "version") : 0) + 1;
+    if (!sameAsLatest)
       yield* db.run(
-        "UPDATE sketches SET version = ?, title = ?, updated_at = ?, updated_by = ?, deleted_at = NULL WHERE code = ?",
-        [version, sketch.title, now, actor, slug],
+        "INSERT INTO sketch_versions (code, version, json, created_at, created_by) VALUES (?, ?, ?, ?, ?)",
+        [slug, version, json, now, actor],
       );
-    } else {
+
+    if (!existing) {
       const key = yield* randomKey;
       yield* db.run(
         "INSERT INTO sketches (code, key, version, title, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [slug, key, version, sketch.title, now, now, actor],
+        [slug, key, goLive ? version : 0, sketch.title, now, now, actor],
       );
+    } else if (goLive) {
+      // 上线（含下线后复活）。已经上线且就是这一版 = 没有变化。
+      const unchanged = num(existing, "deleted_at") === 0 && num(existing, "version") === version;
+      if (!unchanged)
+        yield* db.run(
+          "UPDATE sketches SET version = ?, title = ?, updated_at = ?, updated_by = ?, deleted_at = NULL WHERE code = ?",
+          [version, sketch.title, now, actor, slug],
+        );
+      const after = yield* row(slug);
+      return { ...meta(after!), unchanged, staged: version, warnings: report.warnings };
     }
     const after = yield* row(slug);
-    return { ...meta(after!), unchanged: false, warnings: report.warnings };
+    return { ...meta(after!), unchanged: sameAsLatest, staged: version, warnings: report.warnings };
   });
 
 export const list = Effect.gen(function* () {
@@ -127,34 +137,43 @@ export const list = Effect.gen(function* () {
   return (yield* db.all("SELECT * FROM sketches ORDER BY updated_at DESC")).map(meta);
 });
 
-export const get = (code: string) =>
+/** 元数据 + 一份 JSON：默认是正在对外的版本，也可以指定任意版本（包括只暂存、还没上线的）。 */
+export const get = (code: string, version?: number) =>
   Effect.gen(function* () {
     const slug = slugOf(code);
     const r = yield* live(slug);
+    const want = version ?? num(r, "version");
+    if (want === 0)
+      return yield* new SketchNotFound({
+        what: `${slug}（还没有上线的版本，用 version 指定一个暂存的）`,
+      });
     const db = yield* Db;
     const v = yield* db.first("SELECT json FROM sketch_versions WHERE code = ? AND version = ?", [
       slug,
-      num(r, "version"),
+      want,
     ]);
-    return { ...meta(r), sketch: JSON.parse(str(v ?? {}, "json") || "null") as unknown };
+    if (!v) return yield* new SketchNotFound({ what: `${slug} v${want}` });
+    return { ...meta(r), shown: want, sketch: JSON.parse(str(v, "json")) as unknown };
   });
 
 export const versions = (code: string) =>
   Effect.gen(function* () {
     const slug = slugOf(code);
-    yield* live(slug);
+    const current = num(yield* live(slug), "version");
     const db = yield* Db;
     return (yield* db.all(
       "SELECT version, created_at, created_by FROM sketch_versions WHERE code = ? ORDER BY version DESC",
       [slug],
     )).map((r) => ({
       version: num(r, "version"),
+      live: num(r, "version") === current,
       createdAt: num(r, "created_at"),
       createdBy: str(r, "created_by"),
     }));
   });
 
-export const rollback = (code: string, version: number, actor: string) =>
+/** 让某个版本成为对外的版本——上线一个暂存的版本，或者退回旧版本，是同一个动作；地址不变。 */
+export const promote = (code: string, version: number, actor: string) =>
   Effect.gen(function* () {
     const slug = slugOf(code);
     yield* live(slug);
@@ -203,13 +222,16 @@ export const rotateKey = (code: string, actor: string) =>
     return meta((yield* row(slug))!);
   });
 
-/** 公开读：code + key 都对才给；对错同一种结果（null）。 */
-export const serve = (slug: string, key: string) =>
+/**
+ * 公开读：code + key 都对才给；对错同一种结果（null）。不带 version = 正在对外的版本（还没上线 = null）；
+ * 带 version = 预览那一版（暂存的也行）——闸门仍是同一个 key。
+ */
+export const serve = (slug: string, key: string, version?: number) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const r = yield* db.first(
-      "SELECT s.key AS key, s.deleted_at AS deleted_at, v.json AS json FROM sketches s JOIN sketch_versions v ON v.code = s.code AND v.version = s.version WHERE s.code = ?",
-      [slug],
+      "SELECT s.key AS key, s.deleted_at AS deleted_at, v.json AS json FROM sketches s JOIN sketch_versions v ON v.code = s.code AND v.version = COALESCE(?, s.version) WHERE s.code = ?",
+      [version ?? null, slug],
     );
     if (!r || num(r, "deleted_at") > 0 || !sameKey(str(r, "key"), key)) return null;
     return str(r, "json");

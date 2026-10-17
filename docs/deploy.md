@@ -33,4 +33,4 @@ Worker 里**再验一次** JWT（`src/worker/access.ts`）：绕过边缘到达 
 
 `vp run deploy` = `ci`（类型 + lint + 测试 + effect 扫描 + build）→ `audit`（用本地代码重新体检线上每一份草图）→ 远程迁移 → `cf deploy`。
 本地：`vp run db:migrate && vp dev`（`.dev.vars` 里 `DEV_USER_EMAIL` 当 localhost 上的“登录者”）；`node scripts/do.ts publish … --url http://localhost:5173`。
-回滚某份草图：`rollback_sketch`；回滚整个引擎：`cf` 里回退到上一个 Worker 版本（先看 `audit` 能不能过）。
+回滚某份草图：`promote_sketch {code, version}`（上线一个暂存的版本，或退回旧版本）；回滚整个引擎：`cf` 里回退到上一个 Worker 版本（先看 `audit` 能不能过）。

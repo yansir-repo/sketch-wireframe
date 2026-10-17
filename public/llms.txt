@@ -13,4 +13,4 @@ Publishing and everything that touches stored sketches is on /admin/mcp (Cloudfl
 
 ## MCP tools
 open (/mcp): describe_format, get_example, check_sketch
-admin (/admin/mcp): publish_sketch, list_sketches, get_sketch, sketch_versions, rollback_sketch, remove_sketch, rotate_key
+admin (/admin/mcp): publish_sketch (live or staged), verify_sketch (real browser), promote_sketch, list_sketches, get_sketch, sketch_versions, remove_sketch, rotate_key

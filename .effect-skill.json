@@ -19,6 +19,11 @@
       "reason": "Data programs written with the DSL; evaluated by the CLI and bundled into the Worker as get_example. They build values, they do not run effects."
     },
     {
+      "path": "src/verify/**",
+      "owner": "Browser verification",
+      "reason": "The click-through checks (core.ts) run in a browser page driven through puppeteer: locally by scripts/verify.ts, online by Cloudflare Browser Rendering. They are async programs over a Page, not Effect code; the Worker reaches them only through the Browser service (src/worker/browser.ts), which wraps the call in Effect.tryPromise."
+    },
+    {
       "path": "src/web/**",
       "owner": "Sketch engine (browser)",
       "reason": "The browser-side renderer: a pure function from a Sketch and some state to HTML, plus DOM event wiring. It is not Effect code and never runs on the Worker; it only type-imports the Schema."

@@ -23,6 +23,13 @@
 - 部署前必须过 `vp run audit`（`deploy` 已包含）：用**本地这份代码**把线上每一份草图重新体检一遍，会被拒的就是改坏了的。`examples/` 是随仓库走的语料，由 `src/shared/check.test.ts` 和 `src/web/engine.test.ts` 保证。
 - 改了 `src/web/**`（引擎）或 `docs/format.md` 之后：本机 `vp dev`，`node scripts/do.ts ship examples/catalog.config.ts --url http://localhost:5173 --flow examples/catalog.verify.mjs`（真 Chrome 点整站）。
 
+## 发布：验证通过才上线
+
+- 版本和“对外”是两回事：`sketches.version` 是对外的版本（0 = 还没有），`sketch_versions` 是所有版本。`publish_sketch {live:false}` 只存版本；`promote_sketch` 才改指针（上线和回滚是同一个动作）。`ship` = 体检 → 暂存 → 在预览地址 `?v=` 上验证 → promote，验证不过对外的版本一点没变。
+- 公开读 `serve(slug, key, version?)`：对错、已下线、没上线都是同一种 404；`?v=` 预览仍由同一个 key 把门（拿到 key 的人能看到暂存版本，这是有意的取舍：不为每个预览版本另铸 key）。
+- 验证有两个宿主、一份检查：`src/verify/core.ts`（页面从哪来不是它的事）。线上是 Browser Rendering（`remote.ts` → `browser.ts` 这个 Effect 服务 → MCP 的 `verify_sketch`），本机是 `scripts/verify.ts`。项目自己的流程脚本只能本机跑。
+- `src/worker/tsconfig.json` 带了 `DOM` lib，只因为 `src/verify` 里 `page.evaluate` 的回调要过类型检查；**Worker 代码不能用 DOM 全局**（编译器现在拦不住）。
+
 ## 分层
 
 - `src/shared/`：纯函数，不碰 DOM、不碰 Worker API（schema、dsl、derive、validate、redlines、check、scalar）。Worker、CLI、浏览器引擎三方共用。

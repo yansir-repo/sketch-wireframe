@@ -11,7 +11,8 @@ import exampleSource from "../../examples/catalog.config.ts?raw";
 import formatGuide from "../../docs/format.md?raw";
 import { checkSketch } from "../shared/check.ts";
 import { sketchJsonSchema } from "../shared/schema.ts";
-import { get, list, publish, remove, rollback, rotateKey, versions } from "./sketches.ts";
+import { Browser } from "./browser.ts";
+import { get, list, promote, publish, remove, rotateKey, versions } from "./sketches.ts";
 
 export const MCP_PROTOCOL = "2025-06-18";
 
@@ -62,31 +63,55 @@ export const TOOLS: ReadonlyArray<ToolDef> = [
   {
     name: "publish_sketch",
     description:
-      "[admin] Check, then publish a Sketch. The URL (/s/<code>.<key>) is public to anyone holding the key. The same code keeps the same URL on every re-publish; unchanged content adds no version.",
-    inputSchema: obj({ sketch: sketchArg }, ["sketch"]),
+      "[admin] Check, then store a Sketch as a new version. With live=true (default) it goes live at once at /s/<code>.<key>; with live=false it is only staged: preview it at <url>?v=<staged>, verify it, then promote_sketch. The same code keeps the same URL forever; unchanged content adds no version.",
+    inputSchema: obj(
+      {
+        sketch: sketchArg,
+        live: { type: "boolean", description: "go live now (default true); false = stage only" },
+      },
+      ["sketch"],
+    ),
+    admin: true,
+  },
+  {
+    name: "verify_sketch",
+    description:
+      "[admin] Open a published or staged sketch in a real browser (Cloudflare Browser Rendering) and click through the whole site: every route renders, no broken links, hand-drawn layer drawn, sections labelled, lines fidelity leaks no copy, console clean. Returns ok and the failed checks. Project-specific flows need a local Chrome (scripts/verify.ts --flow).",
+    inputSchema: obj(
+      {
+        code: str("project code"),
+        version: {
+          type: "integer",
+          description: "a version from sketch_versions; default = the live one",
+        },
+      },
+      ["code"],
+    ),
     admin: true,
   },
   {
     name: "list_sketches",
-    description: "[admin] Every published sketch with its URL, version and who last changed it.",
+    description: "[admin] Every sketch with its URL, live version and who last changed it.",
     inputSchema: obj({}),
     admin: true,
   },
   {
     name: "get_sketch",
-    description: "[admin] A published sketch's metadata and the JSON currently served.",
-    inputSchema: code,
+    description:
+      "[admin] A sketch's metadata and its JSON: the live version, or the one named by version (staged ones included).",
+    inputSchema: obj({ code: str("project code"), version: { type: "integer" } }, ["code"]),
     admin: true,
   },
   {
     name: "sketch_versions",
-    description: "[admin] A sketch's version history, newest first.",
+    description: "[admin] A sketch's version history, newest first, with which one is live.",
     inputSchema: code,
     admin: true,
   },
   {
-    name: "rollback_sketch",
-    description: "[admin] Serve an earlier version again (the URL does not change).",
+    name: "promote_sketch",
+    description:
+      "[admin] Make a version the live one: put a staged version live, or go back to an older one. The URL does not change.",
     inputSchema: obj(
       {
         code: str("project code"),
@@ -122,6 +147,9 @@ const field = (args: Record<string, unknown>, name: string) => {
     : bad(`missing ${name}`);
 };
 
+const optInt = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isInteger(v) ? v : undefined;
+
 const withUrl = <T extends { path: string }>(origin: string, m: T) => ({
   ...m,
   url: `${origin}${m.path}`,
@@ -146,21 +174,35 @@ const callTool = (
         const r = checkSketch(args["sketch"]);
         return { ok: r.ok, errors: r.errors, warnings: r.warnings };
       }
-      case "publish_sketch":
-        return withUrl(origin, yield* publish(args["sketch"], actor!));
+      case "publish_sketch": {
+        const p = yield* publish(args["sketch"], actor!, { live: args["live"] !== false });
+        return { ...withUrl(origin, p), previewUrl: `${origin}${p.path}?v=${p.staged}` };
+      }
+      case "verify_sketch": {
+        const g = yield* get(yield* field(args, "code"), optInt(args["version"]));
+        const base = `${origin}${g.path}?v=${g.shown}`;
+        const results = yield* (yield* Browser).verify(base);
+        const failed = results.filter((r) => !r.ok && r.level === "error");
+        return {
+          ok: failed.length === 0,
+          version: g.shown,
+          checked: results.length,
+          failed,
+          warnings: results.filter((r) => !r.ok && r.level === "warn"),
+        };
+      }
       case "list_sketches":
         return (yield* list).map((m) => withUrl(origin, m));
       case "get_sketch": {
-        const g = yield* get(yield* field(args, "code"));
+        const g = yield* get(yield* field(args, "code"), optInt(args["version"]));
         return withUrl(origin, g);
       }
       case "sketch_versions":
         return yield* versions(yield* field(args, "code"));
-      case "rollback_sketch": {
-        const version = args["version"];
-        if (typeof version !== "number" || !Number.isInteger(version))
-          return yield* bad("version must be an integer");
-        return withUrl(origin, yield* rollback(yield* field(args, "code"), version, actor!));
+      case "promote_sketch": {
+        const version = optInt(args["version"]);
+        if (version === undefined) return yield* bad("version must be an integer");
+        return withUrl(origin, yield* promote(yield* field(args, "code"), version, actor!));
       }
       case "remove_sketch":
         return yield* remove(yield* field(args, "code"), actor!);

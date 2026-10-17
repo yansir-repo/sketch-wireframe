@@ -11,7 +11,9 @@ const app = document.querySelector<HTMLElement>("#app")!;
 if (!/^\/s\/[a-z0-9-]+\.[0-9a-f]{16}$/.test(here)) {
   app.textContent = "sketch-wireframe — 这里没有草图。给 agent 的说明见 /llms.txt";
 } else {
-  fetch(`${here}/sketch.json`)
+  fetch(
+    `${here}/sketch.json${location.search.match(/[?&](v=\d+)/)?.[1] ? `?${location.search.match(/[?&](v=\d+)/)![1]}` : ""}`,
+  )
     .then((r) =>
       r.ok ? (r.json() as Promise<Sketch>) : Promise.reject(new Error(`sketch.json ${r.status}`)),
     )

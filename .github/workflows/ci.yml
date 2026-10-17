@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The same judgments as pre-push (`vp run ci`): types, lint, tests, effect scan, build.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vp run ci
+
+  # The engine in a real browser: publish the example to a local dev Worker (real D1 migrations, no Cloudflare
+  # credentials), then click through the whole site and run its CRUD flow.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: gate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Local D1 and dev server
+        run: |
+          echo "DEV_USER_EMAIL=ci@example.test" > .dev.vars
+          pnpm exec vp run db:migrate
+          (pnpm exec vp dev > dev.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://localhost:5173/llms.txt > /dev/null && break; sleep 1; done
+          curl -sf http://localhost:5173/llms.txt > /dev/null || { cat dev.log; exit 1; }
+      - name: Publish the example and verify it
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          url=$(node scripts/do.ts publish examples/catalog.config.ts --url http://localhost:5173 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).url))')
+          echo "published: $url"
+          node scripts/verify.ts "$url" --flow examples/catalog.verify.mjs
+      - if: failure()
+        run: cat dev.log

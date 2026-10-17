@@ -9,9 +9,9 @@ import {
   get,
   list,
   parseSketchPath,
+  promote,
   publish,
   remove,
-  rollback,
   rotateKey,
   serve,
   versions,
@@ -99,7 +99,7 @@ describe("sketch store (real SQL)", () => {
       yield* atNow(remove("ex-catalog", "tester"));
       const again = yield* atNow(publish(sketch(), "tester"));
       expect(again.key).toBe(p.key);
-      expect(again.version).toBe(2);
+      expect(again.version).toBe(1); // same content as the latest version: revived, no new version
       expect(yield* serve("ex-catalog", p.key)).not.toBeNull();
     }).pipe(Effect.provide(freshDb())),
   );
@@ -114,16 +114,58 @@ describe("sketch store (real SQL)", () => {
     }).pipe(Effect.provide(freshDb())),
   );
 
-  it.effect("rolls back to an earlier version without changing the URL", () =>
+  it.effect(
+    "stages without going live: the live URL stays 404 for a new sketch, previews serve the staged version, promote puts it live",
+    () =>
+      Effect.gen(function* () {
+        const staged = yield* atNow(publish(sketch(), "tester", { live: false }));
+        expect(staged.live).toBe(false);
+        expect(staged.staged).toBe(1);
+        expect(yield* serve("ex-catalog", staged.key)).toBeNull(); // not live yet
+        expect(yield* serve("ex-catalog", staged.key, 1)).toContain('"code":"EX-CATALOG"'); // but previewable
+        expect(yield* serve("ex-catalog", "0000000000000000", 1)).toBeNull(); // the key is still the gate
+
+        const live = yield* atNow(promote("EX-CATALOG", 1, "tester"));
+        expect(live.live).toBe(true);
+        expect(yield* serve("ex-catalog", staged.key)).not.toBeNull();
+      }).pipe(Effect.provide(freshDb())),
+  );
+
+  it.effect(
+    "staging a change leaves the live version serving until it is promoted; promote can also go back",
+    () =>
+      Effect.gen(function* () {
+        const p = yield* atNow(publish(sketch(), "tester")); // v1 live
+        const s2 = yield* atNow(publish({ ...sketch(), title: "v2" }, "tester", { live: false }));
+        expect(s2.staged).toBe(2);
+        expect(s2.version).toBe(1); // still serving v1
+        expect(JSON.parse((yield* serve("ex-catalog", p.key))!).title).toBe("范例 · 文具目录站");
+        expect(JSON.parse((yield* serve("ex-catalog", p.key, 2))!).title).toBe("v2");
+        expect((yield* versions("EX-CATALOG")).map((v) => [v.version, v.live])).toEqual([
+          [2, false],
+          [1, true],
+        ]);
+
+        yield* atNow(promote("EX-CATALOG", 2, "tester"));
+        expect(JSON.parse((yield* serve("ex-catalog", p.key))!).title).toBe("v2");
+        const back = yield* atNow(promote("EX-CATALOG", 1, "tester"));
+        expect(back.version).toBe(1);
+        expect(back.key).toBe(p.key);
+        expect(((yield* get("EX-CATALOG")).sketch as { title: string }).title).toBe(
+          "范例 · 文具目录站",
+        );
+        expect((yield* Effect.exit(atNow(promote("EX-CATALOG", 9, "tester"))))._tag).toBe(
+          "Failure",
+        );
+      }).pipe(Effect.provide(freshDb())),
+  );
+
+  it.effect("re-staging identical content adds no version", () =>
     Effect.gen(function* () {
-      const p = yield* atNow(publish(sketch(), "tester"));
-      yield* atNow(publish({ ...sketch(), title: "v2" }, "tester"));
-      const back = yield* atNow(rollback("EX-CATALOG", 1, "tester"));
-      expect(back.version).toBe(1);
-      expect(back.key).toBe(p.key);
-      const g = yield* get("EX-CATALOG");
-      expect((g.sketch as { title: string }).title).toBe("范例 · 文具目录站");
-      expect((yield* Effect.exit(atNow(rollback("EX-CATALOG", 9, "tester"))))._tag).toBe("Failure");
+      yield* atNow(publish(sketch(), "tester", { live: false }));
+      const again = yield* atNow(publish(sketch(), "tester", { live: false }));
+      expect(again.staged).toBe(1);
+      expect((yield* versions("EX-CATALOG")).length).toBe(1);
     }).pipe(Effect.provide(freshDb())),
   );
 });

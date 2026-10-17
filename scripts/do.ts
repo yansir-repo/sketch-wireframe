@@ -7,10 +7,10 @@
  *   node scripts/do.ts get_example                        # a complete valid sketch
  *   node scripts/do.ts build my.config.ts [--out f.json]  # evaluate a TS config → Sketch JSON
  *   node scripts/do.ts check my.config.ts                 # same check the server runs (local, no network)
- *   node scripts/do.ts publish my.config.ts               # check → publish_sketch (admin) → url
- *   node scripts/do.ts ship my.config.ts [--flow f.mjs]   # check → publish → verify the live url in a real Chrome
+ *   node scripts/do.ts publish my.config.ts               # check → publish_sketch (admin): goes live at once
+ *   node scripts/do.ts ship my.config.ts [--flow f.mjs]   # check → stage (not live) → verify the preview → promote; a failed verify leaves the live version untouched
  *   node scripts/do.ts audit                              # re-check every published sketch against THIS checkout's schema/validate (deploy runs it)
- *   node scripts/do.ts list_sketches | get_sketch '{"code":"EX-CATALOG"}' | remove_sketch … | rotate_key … | rollback_sketch …
+ *   node scripts/do.ts list_sketches | get_sketch '{"code":"EX-CATALOG"}' | remove_sketch … | rotate_key … | promote_sketch …
  *
  * A config may `import { … } from "sketch-wireframe"` wherever it lives; this process resolves that name to src/shared/dsl.ts.
  * Output: JSON on stdout; exit 0 ok, 1 failed (tool error, check not ok, verify failed), 2 usage.
@@ -86,21 +86,29 @@ const call = (
 
 const OPEN = new Set(["describe_format", "get_example", "check_sketch"]);
 
-/** One tool call; prints nothing, returns the result or exits 1 with the tool's message. */
-const tool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+/** One tool call that reports failure instead of exiting (ship needs to decide what a failure means). */
+const attempt = async (
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> => {
   const reply = await call(OPEN.has(name) ? "/mcp" : "/admin/mcp", "tools/call", {
     name,
     arguments: args,
   });
-  if (reply.error) {
-    console.error(reply.error.message);
+  if (reply.error) return { ok: false, message: reply.error.message };
+  if (reply.result?.isError)
+    return { ok: false, message: reply.result.content?.[0]?.text ?? "tool failed" };
+  return { ok: true, value: reply.result?.structuredContent?.result ?? null };
+};
+
+/** One tool call; exits 1 with the tool's message on failure. */
+const tool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+  const r = await attempt(name, args);
+  if (!r.ok) {
+    console.error(r.message);
     process.exit(1);
   }
-  if (reply.result?.isError) {
-    console.error(reply.result.content?.[0]?.text ?? "tool failed");
-    process.exit(1);
-  }
-  return reply.result?.structuredContent?.result ?? null;
+  return r.value;
 };
 
 const print = (v: unknown) => console.log(JSON.stringify(v, null, 2));
@@ -111,6 +119,7 @@ const printReport = (r: ReturnType<typeof checkSketch>) => {
   console.error(r.ok ? `ok（${r.warnings.length} 条提示）` : `不能发布：${r.errors.length} 个错误`);
 };
 
+/** 本机 Chrome 验证（可带项目流程脚本）。url 可以是预览地址（?v=）。 */
 const verify = (url: string): number =>
   spawnSync(
     "node",
@@ -142,15 +151,64 @@ switch (command) {
     process.exit(report.ok ? 0 : 1);
     break;
   }
-  case "publish":
-  case "ship": {
+  case "publish": {
     const sketch = await load(file);
     const report = checkSketch(sketch);
     printReport(report);
     if (!report.ok) process.exit(1);
-    const published = (await tool("publish_sketch", { sketch })) as { url: string };
-    print(published);
-    if (command === "ship") process.exit(verify(published.url));
+    print(await tool("publish_sketch", { sketch }));
+    break;
+  }
+  case "ship": {
+    // 验证通过才上线：先暂存（正在对外的版本不动），在预览地址上验证，通过了再 promote。验证不过 = 对外的版本一点没变。
+    const sketch = await load(file);
+    const report = checkSketch(sketch);
+    printReport(report);
+    if (!report.ok) process.exit(1);
+    const staged = (await tool("publish_sketch", { sketch, live: false })) as {
+      code: string;
+      staged: number;
+      version: number;
+      previewUrl: string;
+      url: string;
+    };
+    console.error(
+      `暂存为 v${staged.staged}（对外的仍是 ${staged.version ? `v${staged.version}` : "（还没有）"}）：${staged.previewUrl}`,
+    );
+
+    // 线上浏览器（Browser Rendering）先点一遍；本机 vp dev 没有这个绑定，就用本机 Chrome。
+    const remote = await attempt("verify_sketch", { code: staged.code, version: staged.staged });
+    let localNeeded = !!flag("flow");
+    if (remote.ok) {
+      const v = remote.value as {
+        ok: boolean;
+        failed: Array<{ name: string; detail?: string }>;
+        checked: number;
+      };
+      console.error(
+        `线上浏览器验证：${v.ok ? `${v.checked} 项全部通过` : `${v.failed.length} 项失败`}`,
+      );
+      for (const f of v.failed) console.error(`✗ ${f.name}${f.detail ? `\n    ${f.detail}` : ""}`);
+      if (!v.ok) {
+        console.error(`没有上线。修好之后重新 ship；要放弃这一版不用做任何事（它只是暂存）。`);
+        process.exit(1);
+      }
+    } else if (/not available here/.test(remote.message)) {
+      console.error(`线上浏览器不可用（${base}），改用本机 Chrome`);
+      localNeeded = true;
+    } else {
+      console.error(remote.message);
+      process.exit(1);
+    }
+    if (localNeeded && verify(staged.previewUrl) !== 0) {
+      console.error("本机验证没通过，没有上线。");
+      process.exit(1);
+    }
+    const live = (await tool("promote_sketch", { code: staged.code, version: staged.staged })) as {
+      url: string;
+      version: number;
+    };
+    print({ url: live.url, version: live.version });
     break;
   }
   case "audit": {
