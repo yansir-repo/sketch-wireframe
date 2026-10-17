@@ -66,6 +66,8 @@ export default defineConfig({
       "db:migrate": { command: "node scripts/db-local.mjs migrate", cache: false },
       // Operator command, never part of the gate: needs the remote database's id and the operator's login.
       "db:migrate:remote": { command: "node scripts/db-remote.mjs", cache: false },
+      // Operator command: refreshes cf's OAuth token before it is used (the first call after an expiry is refused with 7403).
+      "cf:ready": { command: "node scripts/cf-ready.mjs", cache: false },
       // Operator command: drives a real Chrome against a running sketch (needs `vp dev` or a deployed URL).
       verify: { command: "node scripts/verify.ts", cache: false },
       // Operator command, never part of the gate (needs the operator's credential and the network): re-checks every
@@ -78,7 +80,9 @@ export default defineConfig({
         command: [
           "vp run ci",
           "vp run audit",
+          "vp run cf:ready",
           "vp run db:migrate:remote",
+          "vp run cf:ready",
           "cf deploy --secrets-file data/prod-secrets.json",
         ],
         cache: false,

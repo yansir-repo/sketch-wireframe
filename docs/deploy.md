@@ -31,6 +31,8 @@ Worker 里**再验一次** JWT（`src/worker/access.ts`）：绕过边缘到达 
 
 ## 发布
 
-`vp run deploy` = `ci`（类型 + lint + 测试 + effect 扫描 + build）→ `audit`（用本地代码重新体检线上每一份草图）→ 远程迁移 → `cf deploy`。
+`vp run deploy` = `ci`（类型 + lint + 测试 + effect 扫描 + build）→ `audit`（用本地代码重新体检线上每一份草图）→ `cf:ready` → 远程迁移 → `cf:ready` → `cf deploy`。
+
+**`cf:ready`（`scripts/cf-ready.mjs`）**：`cf` 的 OAuth 令牌每小时过期，过期后的**第一个** `cf` 调用会被拒绝（`[7403] The given account is not valid or is not authorized to access this service`），同一个调用顺带完成刷新，之后全部正常——所以以前看起来像是 `cf d1 migrations apply` 随机 403（2026-10-17 在两次令牌到期点实测：到期后第一个调用失败、刷新、下一个成功；用 `cf auth whoami` 先吃掉这一次，随后的 d1 调用就不再失败）。条件：只有登录真的没了才会失败（`cf auth login`）。**`cf` 学会先刷新再用的时候删掉它。**
 本地：`vp run db:migrate && vp dev`（`.dev.vars` 里 `DEV_USER_EMAIL` 当 localhost 上的“登录者”）；`node scripts/do.ts publish … --url http://localhost:5173`。
 回滚某份草图：`promote_sketch {code, version}`（上线一个暂存的版本，或退回旧版本）；回滚整个引擎：`cf` 里回退到上一个 Worker 版本（先看 `audit` 能不能过）。
