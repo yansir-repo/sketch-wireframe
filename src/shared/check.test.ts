@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import example from "../../examples/catalog.config.ts";
-import v1 from "./fixtures/catalog.v1.json";
 import { checkSketch } from "./check.ts";
 import {
   accordion,
@@ -28,7 +27,6 @@ import {
   text,
   when,
 } from "./dsl.ts";
-import { migrateSketch, upgradeStored } from "./migrate.ts";
 import { parseSketch, sketchJsonSchema } from "./parse.ts";
 import { pagesOf } from "./derive.ts";
 import { FORMAT_VERSION } from "./schema.ts";
@@ -377,39 +375,6 @@ describe("derived pages", () => {
   });
 });
 
-describe("format 1 → 2 (the old slots are each in disguise)", () => {
-  it("the old example, written in the old language, upgrades to a valid sketch", () => {
-    const up = migrateSketch(v1) as Json;
-    expect(up["v"]).toBe(4);
-    const r = checkSketch(up);
-    expect(r.errors).toEqual([]);
-    expect(JSON.stringify(up)).not.toMatch(/"slot":"(collection|facts|badges|gallery)"/);
-  });
-
-  it("an old sketch can still be loaded through parseSketch, and stored JSON is upgraded on read", () => {
-    expect(parseSketch(v1).ok).toBe(true);
-    const stored = JSON.stringify(v1);
-    expect(JSON.parse(upgradeStored(stored))["v"]).toBe(4);
-    const current = JSON.stringify(example);
-    expect(upgradeStored(current)).toBe(current);
-  });
-
-  it("each old slot becomes exactly what the DSL shorthand writes now", () => {
-    const old = {
-      ...(v1 as Json),
-      pages: {
-        "/": {
-          body: [{ slot: "collection", type: "product", limit: 2, where: { category: "pens" } }],
-        },
-      },
-    };
-    const up = migrateSketch(old) as Json;
-    expect(up["pages"]["/"].body[0]).toEqual(
-      plain(collection("product", { limit: 2, where: { category: "pens" } })),
-    );
-  });
-});
-
 describe("state: params, when, links", () => {
   const withState = (route: string, state: Json, ...nodes: unknown[]): Json => {
     const s = addTo(fresh(), route, ...nodes);
@@ -518,25 +483,6 @@ describe("state: params, when, links", () => {
   });
 });
 
-describe("format 2 → 3 (filters is links + state in disguise)", () => {
-  it("a v2 sketch with a filters leaf upgrades to exactly what the DSL writes now, and validates", () => {
-    const old = fresh();
-    old["v"] = 2;
-    old["pages"]["/product"].body[0].group[0].group[0] = {
-      slot: "filters",
-      fields: ["category", "materials"],
-      w: 1,
-    };
-    const up = migrateSketch(old) as Json;
-    expect(up["v"]).toBe(4);
-    expect(up["pages"]["/product"].body[0].group[0].group[0]).toEqual({
-      ...plain(filters("category", "materials")),
-      w: 1,
-    });
-    expect(checkSketch(up).errors).toEqual([]);
-  });
-});
-
 describe("fold and distinct", () => {
   const at = (n: unknown) => errorsOf(addTo(fresh(), "/", n));
   it("sum/min/max/avg need a number field of the records; count needs none", () => {
@@ -589,23 +535,6 @@ describe("fold and distinct", () => {
     expect(warningsOf(addTo(s, "/", text(3, avg(records("product"), "price_hint"))))).not.toContain(
       "price_hint",
     );
-  });
-});
-
-describe("format 3 → 4 (count is a fold in disguise)", () => {
-  it("a v3 sketch with a count fill upgrades to a fold", () => {
-    const old = fresh();
-    old["v"] = 3;
-    old["pages"]["/"].body.push({
-      group: [{ slot: "text", size: 2, fill: { count: { records: "product" } } }],
-      dir: "col",
-      name: "n",
-    });
-    const up = migrateSketch(old) as Json;
-    expect(up["v"]).toBe(4);
-    const last = up["pages"]["/"].body.at(-1);
-    expect(last.group[0].fill).toEqual({ fold: { op: "count", of: { records: "product" } } });
-    expect(checkSketch(up).errors).toEqual([]);
   });
 });
 

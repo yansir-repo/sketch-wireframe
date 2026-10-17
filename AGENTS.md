@@ -39,7 +39,7 @@
 - **fold 是一簇封闭的运算**（count/sum/min/max/avg）；没有数据时画波浪线，不编。别的计算不加（声明“算出来的”就够）。
 - **blocks / embed**：字段的值可以是一棵同样语法的树；被嵌进去的树里不能再有 embed/form/nav/brand（校验挡，引擎再保一道：一定终止）。
 - **tone 是引擎的外观词汇，不是结构**（accent/card/pair/opt/facet/facets/clear）。它在涨——每加一个都要回答“这是不是在给结构加外观”。嵌套层数只数纯排版的组（有 tone/link/rule/seq 的组和 each 不算）。
-- **格式版本**：`FORMAT_VERSION`（现在 4）。旧的由 `src/shared/migrate.ts` 读时一步步升级（1→2 四个槽成了 each；2→3 filters 成了状态+链接；3→4 count 成了 fold），库里的旧 JSON 原样不动。它同时是个证明：旧语言能表达的，新语言一个不少；`check.test.ts` 逐步对。**移除条件**：库里再没有旧版本（查库：`SELECT count(*) FROM sketch_versions WHERE json NOT LIKE '%"v":4,%'`）。
+- **格式版本**：`FORMAT_VERSION`（现在 4）。**没有迁移代码**：语言有不兼容改动时，先用旧代码把线上每份草图重新发布成新格式（`do.ts get_sketch` → `publish_sketch`），再删掉库里旧格式的版本行，最后才改语言——`audit` 会在部署前拦住“库里还有旧格式”的情况。曾经做过一次（1→4），做法见 git 历史里的 `migrate.ts`。
 
 ## 引擎的硬规矩（它们是 bug 的类，不是个案）
 

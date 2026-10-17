@@ -19,7 +19,7 @@
  */
 import { Schema } from "effect";
 
-/** Sketch JSON 的格式版本。4 = count 成了 fold（count/sum/min/max/avg）的一个特例，多了 distinct 来源；3 = 状态（param）+ 条件出现（when）+ 可点的组（link），filters 槽成了它们的特例；2 = 生成器（Each）取代了 collection/facts/badges/gallery 槽；旧的由 migrate.ts 读时升级。 */
+/** Sketch JSON 的格式版本。4 = count 成了 fold（count/sum/min/max/avg）的一个特例，多了 distinct 来源；3 = 状态（param）+ 条件出现（when）+ 可点的组（link），filters 槽成了它们的特例；2 = 生成器（Each）取代了 collection/facts/badges/gallery 槽 。旧格式没有迁移代码（见 AGENTS.md）。 */
 export const FORMAT_VERSION = 4;
 
 // ---- 来源（Each 逐项生成的那个关系）----

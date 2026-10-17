@@ -68,7 +68,7 @@ const row = (path: Path, n: TNode): string => {
     case "action":
       return `<li class="tree-node"><span class="tree-kind">按钮</span> ${input(path, "fill", n["fill"], "按钮文字", 140)} → ${input(path, "to", n["to"], "去哪个路由，如 /inquiry", 170)}${controls(path)}</li>`;
     default:
-      return `<li class="tree-node"><span class="tree-kind">其他</span> <span class="hint">${esc(String(n["slot"] ?? (typeof n["each"] === "object" ? "each" : "节点")))}：用下面的 JSON 改它</span>${controls(path)}</li>`;
+      return `<li class="tree-node"><span class="tree-kind">其他</span> <span class="hint">${esc(typeof n["slot"] === "string" ? n["slot"] : typeof n["each"] === "object" ? "each" : "节点")}：用下面的 JSON 改它</span>${controls(path)}</li>`;
   }
 };
 
