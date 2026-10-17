@@ -1,13 +1,13 @@
 /**
  * 一棵内容树（blocks 字段的值）的编辑操作：纯函数，不碰 DOM。树用节点语法写成数据（和页面同一套），
  * 路径 = 一串下标：[] 是根（一串节点），[2, 0] 是根的第 2 个节点（必须是组）的第 0 个孩子。
- * 编辑器能结构化编辑的是内容常用的几种：文字、图片、按钮、组（含流程）；其余节点（each 等）原样保留，可以移动、删除，内容用 JSON 编辑。
+ * 编辑器能结构化编辑的是内容常用的几种：文字、图片、媒体占位、按钮、组（含流程）；其余节点（each 等）原样保留，可以移动、删除，内容用 JSON 编辑。
  */
 export type TNode = Record<string, unknown>;
 export type Tree = TNode[];
 export type Path = number[];
 
-export const KINDS = ["text", "image", "action", "col", "row", "grid", "steps"] as const;
+export const KINDS = ["text", "image", "media", "action", "col", "row", "grid", "steps"] as const;
 export type Kind = (typeof KINDS)[number];
 
 export const fresh = (kind: Kind): TNode => {
@@ -16,6 +16,8 @@ export const fresh = (kind: Kind): TNode => {
       return { slot: "text", size: 3 };
     case "image":
       return { slot: "image" };
+    case "media":
+      return { slot: "media", kind: "video" };
     case "action":
       return { slot: "action" };
     case "steps":

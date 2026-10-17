@@ -148,7 +148,7 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 | 关系：相关产品、相关案例 | `f.ref(label, "另一个内容类型", {multiple?})`，存对方的主键。详情页用 `facts({only:["related"]})` 显示成链接；集合里用 `where` 查关系（如 `collection("case", {where:{products:"$slug"}})` = 提到当前产品的案例）。引用词表用 `term`，引用内容用 `ref` |
 | 只给后台的字段（审核状态、负责人、核实时间） | `{ internal: true }`：任何客户页面都不能展示它（绑定、facts、筛选、徽章都会被体检拦），公开表单里也没有；后台表格和表单里有 |
 | 可变长、每个记录自己的结构（技术参数） | `f.list(label, {key:"参数名", value:"参数值"}, {kv:true})`，每行带稳定的 `row_id`（不是下标） |
-| 内容本身是一棵树（文章正文） | `f.blocks(label)`：值是一串节点（和页面同一套语法写成数据，不能含 embed / form / nav / brand），详情页用 `embed(bind("body"))` 渲染；后台里是 JSON 文本框，保存时校验 |
+| 内容本身是一棵树（文章正文） | `f.blocks(label)`：值是一串节点（和页面同一套语法写成数据，不能含 embed / form / nav / brand），详情页用 `embed(bind("body"))` 渲染；后台里是可编辑的大纲（文字、图片、媒体占位、按钮、组/流程可以加删移动、改内容；其余节点用折叠的 JSON 改），保存时校验 |
 | 日期 | `f.date(label)`：ISO（`2026-10-17`），表单里是日期输入，能排序 |
 | 图片 | `f.media(label)`（后台可上传，浏览器里压到长边 ≤800px） |
 | 访客可提交（询盘） | `defType(label, {public:true, …})` → 自动得到公开表单页，提交的记录出现在后台 |

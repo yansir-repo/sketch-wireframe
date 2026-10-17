@@ -702,6 +702,12 @@ describe("media", () => {
     expect(errorsOf(s)).toBe("");
   });
 
+  it("what the tree editor creates for a media node passes the same check as a hand-written one", () => {
+    const s = fresh();
+    s["model"]["article"].seed[0].body = [{ slot: "media", kind: "video" }];
+    expect(errorsOf(s)).toBe("");
+  });
+
   it("rejects a kind that does not exist (schema), and a caption bound to a missing field", () => {
     expect(parseSketch(addTo(fresh(), "/", { slot: "media", kind: "hologram" })).ok).toBe(false);
     expect(errorsOf(addTo(fresh(), "/product/:id", media("file", bind("nope"))))).toContain("nope");

@@ -74,3 +74,14 @@ describe("tree editor (outline)", () => {
     expect(html).toContain("data-tree-raw");
   });
 });
+
+describe("media nodes in the editor", () => {
+  it("a fresh media node is a valid node, its kind is editable, and the outline offers the kinds", () => {
+    expect(fresh("media")).toEqual({ slot: "media", kind: "video" });
+    const t = update([fresh("media")], [0], "kind", "map");
+    expect(t[0]).toEqual({ slot: "media", kind: "map" });
+    const html = treeBody(t);
+    expect(html).toContain("媒体");
+    expect(html).toContain('data-tree-set="kind"');
+  });
+});

@@ -9,6 +9,7 @@ import { KINDS, isGroup, type Kind, type Path, type TNode, type Tree } from "./t
 const LABEL: Record<Kind, string> = {
   text: "文字",
   image: "图片",
+  media: "媒体（视频/地图/图表/图标/文件）",
   action: "按钮",
   col: "纵向组",
   row: "横向组",
@@ -65,6 +66,19 @@ const row = (path: Path, n: TNode): string => {
       )} ${input(path, "fill", n["fill"], "写了就显示，不写 = 波浪线", 240)}${controls(path)}</li>`;
     case "image":
       return `<li class="tree-node"><span class="tree-kind">图片</span> ${input(path, "fill", n["fill"], "图注（可不填）", 200)}${controls(path)}</li>`;
+    case "media":
+      return `<li class="tree-node"><span class="tree-kind">媒体</span> ${select(
+        path,
+        "kind",
+        n["kind"],
+        [
+          ["video", "视频"],
+          ["map", "地图"],
+          ["chart", "图表"],
+          ["icon", "图标"],
+          ["file", "文件"],
+        ],
+      )} ${input(path, "fill", n["fill"], "说明（可不填）", 200)}${controls(path)}</li>`;
     case "action":
       return `<li class="tree-node"><span class="tree-kind">按钮</span> ${input(path, "fill", n["fill"], "按钮文字", 140)} → ${input(path, "to", n["to"], "去哪个路由，如 /inquiry", 170)}${controls(path)}</li>`;
     default:
