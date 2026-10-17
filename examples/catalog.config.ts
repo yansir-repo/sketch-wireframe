@@ -6,7 +6,6 @@ import {
   accordion,
   action,
   badges,
-  brand,
   bind,
   col,
   collection,
@@ -18,24 +17,21 @@ import {
   each,
   f,
   facts,
-  filters,
   form,
-  free,
   gallery,
+  hero,
   manyOf,
   media,
   min,
   oneOf,
   pair,
   image,
-  nav,
-  pager,
+  listPage,
   records,
+  related,
   row,
-  search,
   section,
-  sortMenu,
-  span,
+  siteHeader,
   steps,
   tabs,
   text,
@@ -143,14 +139,6 @@ const inquiry = defType("获取报价", {
   },
 });
 
-// 型号列表：每页 6 条，按 sort 参数排，按 q 搜；页码读 page 参数
-const PRODUCT_LIST = records("product", {
-  limit: 6,
-  order: { param: "sort" },
-  search: { param: "q" },
-  page: { param: "page" },
-});
-
 export default defineSketch({
   code: "EX-CATALOG",
   title: "范例 · 文具目录站",
@@ -158,21 +146,23 @@ export default defineSketch({
   session: { viewer: oneOf(["visitor", "member"]) },
   model: { category, material, cert, product, article, inquiry },
 
-  header: row(
-    brand("示例文具"),
-    nav("/", "/category", "/product", "/article", "/compare", "/inquiry"),
-    row(
-      when(
-        "viewer=visitor",
-        action("会员登录", undefined, { ghost: true, set: { viewer: "member" } }),
+  header: siteHeader({
+    brand: "示例文具",
+    nav: ["/", "/category", "/product", "/article", "/compare", "/inquiry"],
+    actions: [
+      row(
+        when(
+          "viewer=visitor",
+          action("会员登录", undefined, { ghost: true, set: { viewer: "member" } }),
+        ),
+        when(
+          "viewer=member",
+          action("退出登录", undefined, { ghost: true, set: { viewer: "visitor" } }),
+        ),
+        action("获取报价", "/inquiry"),
       ),
-      when(
-        "viewer=member",
-        action("退出登录", undefined, { ghost: true, set: { viewer: "visitor" } }),
-      ),
-      action("获取报价", "/inquiry"),
-    ),
-  ),
+    ],
+  }),
   footer: row(text(3, "联系方式"), text(3, "版权")),
 
   pages: {
@@ -182,14 +172,12 @@ export default defineSketch({
         // 标题/副标题还没定——不写，画成波浪线
         section(
           "Hero",
-          row(
-            col(
-              text(1),
-              text(2),
-              row(action("获取报价", "/inquiry"), action("查看产品", "/category", { ghost: true })),
-            ),
-            image(),
-          ),
+          hero({
+            actions: [
+              action("获取报价", "/inquiry"),
+              action("查看产品", "/category", { ghost: true }),
+            ],
+          }),
         ),
         section("产品分类入口", collection("category", { limit: 8 })),
         section("热门型号", collection("product", { limit: 4 })),
@@ -221,9 +209,12 @@ export default defineSketch({
     },
 
     // 左栏筛选 : 右栏产品 = 1 : 3。筛选的字段由模型推出，这里只选哪些出现
-    "/category/:id": {
-      ctx: { type: "product", many: true, where: { category: ":id" } },
-      body: [
+    // 列表页模式：左边筛选、右边卡片和页码，筛选/排序/搜索/分页的状态参数一次接好；before 是前面再加的板块
+    "/category/:id": listPage("product", {
+      title: "产品",
+      where: { category: ":id" },
+      filters: ["materials", "certs"],
+      before: [
         // fold：对一个来源折叠出一个值。没有数据时画波浪线，不编
         section(
           "概览",
@@ -235,53 +226,25 @@ export default defineSketch({
             ),
           ),
         ),
-        section(
-          "产品",
-          row(
-            span(1, filters("materials", "certs")),
-            span(3, collection("product", { where: { category: ":id" }, limit: 24 })),
-          ),
-        ),
       ],
-    },
+    }),
 
-    // 排序 / 搜索 / 分页：三者都是地址里的参数（?sort=-moq&q=P1&page=2），和筛选、标签页同一个机制；
-    // 每页 6 条，列表和页码写的是同一个 records 来源
-    "/product": {
+    // 排序 / 搜索 / 分页：地址里的参数（?sort=-moq&q=P1&page=2），和筛选、标签页同一个机制；每页 6 条
+    "/product": listPage("product", {
       name: "全部型号",
-      ctx: { type: "product", many: true },
-      state: { sort: oneOf(["code", "-moq", "moq"]), q: free(), page: free("1") },
-      body: [
-        section(
-          "产品",
-          row(
-            span(1, filters("category", "materials", "certs")),
-            span(
-              3,
-              col(
-                row(
-                  search("q"),
-                  sortMenu("sort", [
-                    ["code", "型号"],
-                    ["-moq", "起订量从高到低"],
-                    ["moq", "起订量从低到高"],
-                  ]),
-                ),
-                each(PRODUCT_LIST, undefined, { dir: "grid" }),
-                pager(PRODUCT_LIST),
-              ),
-            ),
-          ),
-        ),
+      title: "产品",
+      filters: ["category", "materials", "certs"],
+      search: true,
+      sort: [
+        ["code", "型号"],
+        ["-moq", "起订量从高到低"],
+        ["moq", "起订量从低到高"],
       ],
-    },
+      per: 6,
+    }),
 
-    // 文章：最新在前（发布日期是 date 字段，order 写成 "-published"）
-    "/article": {
-      name: "文章",
-      ctx: { type: "article", many: true },
-      body: [section("文章", collection("article", { limit: 24, order: "-published" }))],
-    },
+    // 文章：最新在前（发布日期是 date 字段，order 写死成 "-published"）
+    "/article": listPage("article", { name: "文章", title: "文章", order: "-published", per: 24 }),
 
     // 对比表：几个字段（行）× 几条记录（列）——两层 each，不是新的槽
     "/compare": {
@@ -322,10 +285,7 @@ export default defineSketch({
         ),
         // 只有会员看得到的一块：条件出现，条件是会话参数
         when("viewer=member", section("会员资料", text(3), text(3))),
-        section(
-          "同类型号",
-          collection("product", { where: { category: "$category" }, notSelf: true, limit: 4 }),
-        ),
+        section("同类型号", related("product", "category")),
       ],
     },
 

@@ -3,7 +3,17 @@
  * 作者只写偏离默认的部分（首页这类无法推出的单例页，以及想换排布的模板）。
  * 纯函数、不碰 DOM：浏览器里的引擎和 Node 里的 check/verify 用同一份推导。
  */
-import { badges, bind, collection, embed, facts, form, gallery, section, text } from "./dsl.ts";
+import {
+  badges,
+  bind,
+  collection,
+  embed,
+  facts,
+  form,
+  gallery,
+  section,
+  text,
+} from "./builders.ts";
 import { factFields } from "./facts.ts";
 import type { Node, Page, Sketch } from "./schema.ts";
 

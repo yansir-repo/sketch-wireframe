@@ -33,6 +33,7 @@
 ## 语言的形状：叶子、排列、生成，加上状态
 
 - **只有这些东西**（`src/shared/schema.ts`）：叶子（text/image/action/brand/nav/form/embed）、排列（col/row/grid，可带 when / link）、生成（`each`：对 records / fields / items / distinct / facets / options / param 逐项生成）。`collection / facts / badges / gallery / filters / compare / steps / tabs / accordion` **不是槽**，是 `dsl.ts` 里几行的简写。**新需求先问：这是对哪个关系逐项生成什么、或者环境里多了什么？** 不要加槽；真要加叶子，先说明它为什么不是已有东西的组合。
+- **模式不是语言**（`src/shared/patterns.ts`：hero、cta、featureCols、related、siteHeader、listPage、formPage……）：builders 的命名组合，展开后是普通节点树，不进 schema、不改格式版本，测试在 `patterns.test.ts`。**准入：至少两个站点手写了同一个结构**；模式不给默认文案；DSL 的入口是 `dsl.ts`（= `builders.ts`（语言的构建函数）+ `patterns.ts`）。
 - **环境**：命名绑定（页面记录 `page`、each 的 `as`）+ **状态参数**。bind 路径的语法和静态解析、树的遍历（带着每处的环境）只在 `src/shared/scope.ts`；引擎运行时对同一套路径求值。
 - **状态只有一个家：地址的 `?query`**（页面级参数、筛选、会话级参数的显式值）；会话级参数另存浏览器里（换页不丢）。控制它的是链接（`action.set` / 组的 `link`），显示由 `when`。**不要为“页面内状态”另造机制**——标签页、手风琴、筛选、角色都是同一个东西；每个声明过的取值都是可以直接打开的页面，验证器逐个点到（`sampleRoutes`）。
 - **链接带环境**：`action.with` 写进目标地址的 `?query`，目标页的新增表单读它当初始值。

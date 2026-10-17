@@ -45,7 +45,7 @@ Page   = 路由 × 环境 → Node                  环境 = 命名绑定（页�
 - `when("tab=specs", node)`：条件出现。`"open=q1"` 对多选参数是“包含”，`"a|b"` = 几个参数里任意一个有值，只写参数名 = 有值。
 - `linked(组, {to?, with?, set?})`：让一个组成为链接；选中与否由地址里的参数推出（选项勾上、没得选的变淡）。
 - `steps(...)`：**孩子有顺序**（流程）。结构里只声明“顺序有意义”，序号和连接线由引擎画。
-- 没有 hero / 卡片网格 / 对比表 这类变体：经典布局是这些的组合；想复用就在配置里写函数。嵌套超过 5 层会警告。
+- **语言里**没有 hero / 卡片网格 / 对比表 这类变体：经典布局是这些的组合（常见的有名字，见下面“模式”）。嵌套超过 5 层会警告。
 
 ### 生成：`each(来源, 每一项怎么画, {as?, dir?, seq?, rule?})`
 
@@ -102,6 +102,24 @@ pager(LIST),                      // 同一个 records 来源：页数由它筛�
 - **搜索**：找 text / choice / term / number / date 字段的显示文字（不含 internal，不含只当主键的字段，不含 ref——别的记录的名字不算这一条的）。没有后端：纯文本包含匹配，不做相关性排序。
 - **分页**：`pager` 只有一页时不出现。过滤（筛选、搜索）变了，页数跟着变，页码自动夹到范围内。
 - 自由文本参数 `free()` 没有有限的取值，验证器只抽样（该列表第一条记录名里的一个词，和 `?page=2`）。`facts` 想分成几个板块，就每个板块写自己的 `only`，别重复同一个 `facts()`。
+
+### 模式（常见结构的命名组合，DSL 层，不是语言）
+
+模式只是上面那些的组合，**展开后就是普通的节点树**（体检、验证看到的是展开后的），所以不进 schema、不改格式；JSON 里没有“模式”这个东西。
+模式不替你写文案：不给的文字是波浪线；**板块的名字由你用 `section("名字", …)` 给**（页面顶层必须是带名字的板块）。
+
+| 模式 | 展开成 |
+|---|---|
+| `split(文案节点[], 右边?)` | `row(col(...文案), 右边 ?? image())` |
+| `hero({title?, sub?, actions?, side?})` | `split([text(1), text(2), row(...actions)], side)` |
+| `cta({text?, actions})` | `row(text(2, …), ...actions)` |
+| `featureCols({title?, body?, image?}, …)` | `row(col(image?, text(2), text(3)), …)`；`title` / `body` 写 `false` = 没有这一项 |
+| `related(类型, 字段, limit?)` | `collection(类型, {where: {字段: "$字段"}, notSelf: true, limit})`（详情页里的“同类”） |
+| `siteHeader({brand?, nav, actions?})` | `row(brand, nav(...), ...actions)` |
+| `listPage(类型, {title, name?, where?, filters?, search?, sort?, order?, per?, before?, after?})` | 一个**页面**：左栏筛选 + 右边（搜索框、排序菜单、记录卡片、页码），并声明 `sort` / `q` / `page` 三个参数；`where` 同时写进 ctx；`before` / `after` 是前后再加的板块 |
+| `formPage(类型, {title, name?, before?, after?})` | 一个**页面**：“新增某类型”，板块里放 `form()` |
+
+准入规则：至少两个站点手写了同一个结构才抽成模式；写函数复用自己的结构，永远可以。
 
 ### 没填的一律是粗波浪线
 
