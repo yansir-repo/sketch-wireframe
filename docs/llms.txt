@@ -1,0 +1,21 @@
+# sketch-wireframe
+
+> Express a client website's structure as a hand-drawn sketch — a real clickable site with working add / edit / delete — and publish it as one link that only its key holder can open.
+> 把客户网站的结构画成手绘草图（真能点、能增删改），发布成一个带 key 的链接。
+
+## For agents: start here
+
+- Open MCP, no credential: POST {{origin}}/mcp — tools `describe_format`, `get_example`, `check_sketch`.
+- Operator MCP, Cloudflare Access service token: POST {{origin}}/admin/mcp — adds `publish_sketch`, `verify_sketch`, `promote_sketch`, `list_sketches`, `get_sketch`, `sketch_versions`, `remove_sketch`, `rotate_key`.
+- Flow: `describe_format` → `get_example` → `check_sketch` until ok → `publish_sketch {live:false}` → `verify_sketch` (real browser) → `promote_sketch`. The link never changes for a given project code.
+- CLI: `scripts/do.ts` in the repo; `ship` runs the whole flow and leaves the live version untouched if verification fails.
+
+## Example
+
+- Live example, a fictional stationery catalog: {{example}}
+- Inside any sketch, `#/_model` is the data-structure diagram and the CRUD back office (the sketch itself never links to it).
+
+## Links
+
+- Source: https://github.com/yansir-repo/sketch-wireframe
+- Grammar: `docs/format.md` in the repo (also returned by `describe_format`). Operations: `docs/agent-api.md`.

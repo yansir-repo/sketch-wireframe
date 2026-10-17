@@ -10,7 +10,9 @@
     "verbatimModuleSyntax": true,
     "lib": ["ESNext"],
     "types": ["@cloudflare/workers-types", "node"],
-    "paths": { "sketch-wireframe": ["../../shared/dsl.ts"] }
+    "paths": {
+      "sketch-wireframe": ["../../shared/dsl.ts"]
+    }
   },
   "include": [
     "**/*.ts",
@@ -18,6 +20,8 @@
     "../db.ts",
     "../clock.ts",
     "../../shared/**/*.ts",
-    "../../../examples/**/*.ts"
+    "../../../examples/**/*.ts",
+    "../home.ts",
+    "../raw.d.ts"
   ]
 }

@@ -15,9 +15,10 @@ export default defineConfig((ctx) => ({
     workersDev: true,
     previewUrls: false,
     assets: {
-      notFoundHandling: "single-page-application",
+      // Unknown paths are 404s: the engine's page is only ever served by the Worker, under /s/<code>.<key>.
+      notFoundHandling: "none",
       // A sketch's page and data are gated by the key in the path, so the Worker answers them before assets.
-      runWorkerFirst: ["/s/*", "/mcp", "/admin/mcp"],
+      runWorkerFirst: ["/", "/llms.txt", "/s/*", "/mcp", "/admin/mcp"],
     },
     env: {
       DB: bindings.d1({ name: "sketch-wireframe", id: "99c00e0d-5883-4406-8d9f-38538dad0e65" }),

@@ -236,3 +236,13 @@ export const serve = (slug: string, key: string, version?: number) =>
     if (!r || num(r, "deleted_at") > 0 || !sameKey(str(r, "key"), key)) return null;
     return str(r, "json");
   });
+
+/** 首页上唯一出现的草图：范例（虚构的）。库里没有或没上线 = null。 */
+export const exampleUrl = (origin: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const r = yield* db.first(
+      "SELECT key FROM sketches WHERE code = 'ex-catalog' AND deleted_at IS NULL AND version > 0",
+    );
+    return r ? `${origin}${sketchPath("ex-catalog", str(r, "key"))}` : null;
+  });

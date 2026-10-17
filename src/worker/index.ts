@@ -15,7 +15,9 @@ import { AccessVerifierLive } from "./access.ts";
 import { BrowserLive } from "./browser.ts";
 import { DbLive, type D1Like } from "./db.ts";
 import { handleMcp } from "./mcp.ts";
-import { parseSketchPath, serve } from "./sketches.ts";
+import llms from "../../docs/llms.txt?raw";
+import { fillTemplate, renderPage } from "./home.ts";
+import { exampleUrl, parseSketchPath, serve } from "./sketches.ts";
 import { LocalUserLive, actorLabel, currentActor } from "./user.ts";
 
 const Verifier = AccessVerifierLive({
@@ -62,6 +64,29 @@ const sketchRoute = (db: D1Like) =>
     }),
   );
 
+/** 首页与 /llms.txt：同一份内容。浏览器（Accept 里有 text/html）拿排好版的页面，其余（agent、curl）拿 markdown 原文。 */
+const homeRoute = (db: D1Like, path: "/" | "/llms.txt") =>
+  HttpRouter.add(
+    "GET",
+    path,
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const origin = env.PUBLIC_URL.replace(/\/$/, "");
+      const example = yield* exampleUrl(origin).pipe(Effect.provide(ServicesLive(db)));
+      const text = fillTemplate(llms, origin, example);
+      const wantsHtml = path === "/" && (request.headers["accept"] ?? "").includes("text/html");
+      return wantsHtml
+        ? HttpServerResponse.text(renderPage(text), {
+            contentType: "text/html; charset=utf-8",
+            headers: { "x-robots-tag": "noindex" },
+          })
+        : HttpServerResponse.text(text, {
+            contentType: "text/markdown; charset=utf-8",
+            headers: { "x-robots-tag": "noindex" },
+          });
+    }),
+  );
+
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const MAX_BODY = 2_000_000;
 
@@ -100,9 +125,17 @@ const mcpRoute = (db: D1Like, path: "/mcp" | "/admin/mcp") =>
 
 /** One web handler per request: a Workers isolate serves requests concurrently, and I/O created for one request cannot be awaited by another. */
 const buildHandler = (db: D1Like) =>
-  HttpRouter.toWebHandler(Layer.mergeAll(sketchRoute(db), mcpRoute(db, "/mcp")), {
-    disableLogger: true,
-  });
+  HttpRouter.toWebHandler(
+    Layer.mergeAll(
+      sketchRoute(db),
+      homeRoute(db, "/"),
+      homeRoute(db, "/llms.txt"),
+      mcpRoute(db, "/mcp"),
+    ),
+    {
+      disableLogger: true,
+    },
+  );
 
 /** The operator's surface in its own handler, so the identity check covers exactly it. Access gates the path at the edge; this refuses a request that got here some other way. */
 const buildAdminHandler = (db: D1Like) =>
@@ -151,7 +184,10 @@ export default {
               headers: { allow: "POST" },
             }),
           );
-    if (pathname.startsWith("/s/") && request.method === "GET")
+    if (
+      (pathname.startsWith("/s/") || pathname === "/" || pathname === "/llms.txt") &&
+      request.method === "GET"
+    )
       return respond(buildHandler(env.DB))(request);
     return Promise.resolve(new Response("Not found", { status: 404 }));
   },
