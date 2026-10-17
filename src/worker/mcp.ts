@@ -45,14 +45,22 @@ export const TOOLS: ReadonlyArray<ToolDef> = [
   {
     name: "describe_format",
     description:
-      "How to express a website's structure as a hand-drawn sketch: the grammar (slots, groups, model, pages), rules, red lines, and the JSON Schema. Read this first.",
+      "How to express a website's structure as a hand-drawn sketch: the grammar (slots, groups, model, pages), rules, red lines. Returns the guide as plain markdown text. Read this first. (The JSON Schema is a separate tool: get_schema.)",
+    inputSchema: obj({}),
+  },
+  {
+    name: "get_schema",
+    description:
+      "The JSON Schema of a Sketch (large). Only needed if you write the Sketch as JSON by hand; with the TypeScript DSL the guide and the example are enough.",
     inputSchema: obj({}),
   },
   {
     name: "get_example",
     description:
-      "A complete, valid example: the Sketch JSON and the TypeScript config it was built from. The standard answer for shape and style.",
-    inputSchema: obj({}),
+      'A complete, valid example, the standard answer for shape and style. format="ts" (default) returns the TypeScript config source as plain text; format="json" returns the Sketch JSON.',
+    inputSchema: obj({
+      format: { type: "string", enum: ["ts", "json"], description: "default ts" },
+    }),
   },
   {
     name: "check_sketch",
@@ -167,9 +175,13 @@ const callTool = (
     if (tool.admin && actor === null) return yield* bad(`${name} needs the admin endpoint`);
     switch (name) {
       case "describe_format":
-        return { guide: formatGuide, jsonSchema: sketchJsonSchema() };
+        return formatGuide;
+      case "get_schema":
+        return sketchJsonSchema();
       case "get_example":
-        return { sketch: JSON.parse(JSON.stringify(example)) as unknown, source: exampleSource };
+        return args["format"] === "json"
+          ? (JSON.parse(JSON.stringify(example)) as unknown)
+          : exampleSource;
       case "check_sketch": {
         const r = checkSketch(args["sketch"]);
         return { ok: r.ok, errors: r.errors, warnings: r.warnings };
@@ -187,6 +199,7 @@ const callTool = (
           ok: failed.length === 0,
           version: g.shown,
           checked: results.length,
+          passed: results.filter((r) => r.ok).map((r) => r.name),
           failed,
           warnings: results.filter((r) => !r.ok && r.level === "warn"),
         };
@@ -277,7 +290,13 @@ export const handleMcp = (message: RpcMessage, origin: string, actor: string | n
         return yield* callTool(name, args, origin, actor).pipe(
           Effect.map((value) =>
             result(id, {
-              content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+              // 字符串结果（指南、范例源码）原样给，不再套一层 JSON 转义
+              content: [
+                {
+                  type: "text",
+                  text: typeof value === "string" ? value : JSON.stringify(value, null, 2),
+                },
+              ],
               structuredContent: { result: value },
             }),
           ),

@@ -254,3 +254,36 @@ describe("design-quality warnings (do not block publishing)", () => {
     expect(warnings(s)).not.toContain("locale");
   });
 });
+
+type Rec = Record<string, unknown>;
+
+describe("relation collections that are always empty", () => {
+  it("warns when a $field where matches nothing on any seed record, and stays quiet when records are related", () => {
+    const s = fresh();
+    s["pages"]["/product/:id"].body.push({
+      group: [
+        { slot: "collection", type: "product", where: { category: "$category" }, notSelf: true },
+      ],
+      dir: "col",
+      name: "same category",
+    });
+    expect(checkSketch(s).warnings.join("\n")).not.toContain("永远是空的");
+    // every product in its own category: nothing is ever related
+    const lonely = fresh();
+    (lonely["model"]["product"].seed as Rec[]).forEach((r, i) => {
+      r["category"] = ["pens", "notebooks", "folders", "desk"][i % 4];
+    });
+    lonely["model"]["product"].seed = (lonely["model"]["product"].seed as Rec[]).filter(
+      (r, i, all) => all.findIndex((x) => x["category"] === r["category"]) === i,
+    );
+    for (const r of lonely["model"]["product"].seed as Rec[]) r["related"] = [];
+    lonely["pages"]["/product/:id"].body.push({
+      group: [
+        { slot: "collection", type: "product", where: { category: "$category" }, notSelf: true },
+      ],
+      dir: "col",
+      name: "same category",
+    });
+    expect(checkSketch(lonely).warnings.join("\n")).toContain("永远是空的");
+  });
+});

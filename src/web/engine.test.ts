@@ -322,15 +322,78 @@ describe("nav and brand", () => {
     sel: {},
     path: "/",
   };
-  it("a long nav is collapsed behind a menu button; a short one is not", () => {
-    const many = node({ slot: "nav", paths: Array.from({ length: 8 }, () => "/") }, rc);
-    expect(many).toContain('class="nav many"');
-    expect(node({ slot: "nav", paths: ["/", "/product"] }, rc)).not.toContain("many");
+  it("a nav renders its links plus a menu button; collapsing is decided by the browser from what fits", () => {
+    const html = node({ slot: "nav", paths: ["/", "/product"] }, rc);
+    expect(html).toContain("nav-toggle");
+    expect(html).toContain("nav-links");
+    expect(html).not.toContain("collapsed");
   });
   it("a brand is a link home, drawn as a frame, not a button", () => {
     const html = node({ slot: "brand", fill: "Acme" }, rc);
     expect(html).toContain('class="brand"');
     expect(html).toContain('href="#/"');
     expect(html).not.toContain('class="btn');
+  });
+});
+
+describe("empty values are scribbles, not nothing", () => {
+  const db = createDb(example, memory());
+  const rc = (record: Record<string, unknown>): RC => ({
+    s: example,
+    db,
+    fid: "words",
+    pages: pagesOf(example),
+    params: {},
+    seq: { n: 0 },
+    viewer: new Map(),
+    sel: {},
+    path: "/",
+    type: "product",
+    record,
+  });
+  it("a bound field with no value on this record draws a scribble (the author may leave a display name empty)", () => {
+    const html = node({ slot: "text", size: 3, fill: { bind: "code" } }, rc({ code: "" }));
+    expect(html).toContain('data-rough="sq"');
+    expect(html).not.toContain("data-copy");
+  });
+  it("a facts block whose fields are all empty still shows its field names, with scribbles for values", () => {
+    const html = node(
+      { slot: "facts", only: ["materials", "certs"] },
+      rc({ code: "X", materials: [], certs: [] }),
+    );
+    expect(html).toContain("材质");
+    expect(html).toContain('data-rough="sq"');
+    expect(html.match(/class="fact"/g)?.length).toBe(2);
+  });
+  it("a facts block with some values hides the empty ones", () => {
+    const html = node(
+      { slot: "facts", only: ["materials", "certs"] },
+      rc({ code: "X", materials: ["metal"], certs: [] }),
+    );
+    expect(html).toContain("材质");
+    expect(html).not.toContain("认证");
+  });
+});
+
+describe("an empty kv list (a spec table with no rows yet)", () => {
+  it("shows a few scribbled name/value rows, so the section is visibly a table", () => {
+    const db = createDb(example, memory());
+    const html = node(
+      { slot: "facts", only: ["specs"] },
+      {
+        s: example,
+        db,
+        fid: "words",
+        pages: pagesOf(example),
+        params: {},
+        seq: { n: 0 },
+        viewer: new Map(),
+        sel: {},
+        path: "/",
+        type: "product",
+        record: { code: "X", specs: [] },
+      },
+    );
+    expect(html.match(/class="fact"/g)?.length).toBe(3);
   });
 });

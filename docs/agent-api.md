@@ -19,8 +19,9 @@ claude mcp add --transport http sketch-admin https://sketch-wireframe.yansir.wor
 
 | 工具 | 作用 |
 |---|---|
-| `describe_format` | 草图格式：语法（槽、组、模型、页面）、规则、红线 + JSON Schema。**先读它** |
-| `get_example` | 一份完整有效的范例（Sketch JSON + 它的 TS 配置源码） |
+| `describe_format` | 草图格式：语法（槽、组、模型、页面）、规则、红线，**纯文本 markdown**。**先读它** |
+| `get_example {format?}` | 一份完整有效的范例：默认 `ts` = 它的 TS 配置源码（纯文本）；`json` = Sketch JSON |
+| `get_schema` | Sketch 的 JSON Schema（很大）。只有手写 JSON 才需要；用 TS DSL 的话读指南和范例就够 |
 | `check_sketch {sketch}` | 不发布，体检：结构（Schema）、语义（引用/路由/seed）、公开预览红线（价格/密码/令牌）。返回 `ok`、`errors`、`warnings` |
 | `publish_sketch {sketch, live?}` 🔒 | 体检通过才存成新版本，返回 `url`（`/s/<code>.<key>`）。`live` 默认 true = 立刻上线；`live:false` = **只暂存**：正在对外的版本不变，预览地址 `<url>?v=<版本>` 能看。同一编号永远同一个地址；内容和最新版本一样不加版本 |
 | `verify_sketch {code, version?}` 🔒 | 在线上真浏览器（Cloudflare Browser Rendering）里把整站点一遍：每个路由能渲染、无坏链、手绘层画出来、板块有标签、**线条档零文案**、控制台零报错。`version` 默认是对外的那版，暂存的也行。项目自己的流程要本机 Chrome（`verify.ts --flow`） |
@@ -33,7 +34,7 @@ claude mcp add --transport http sketch-admin https://sketch-wireframe.yansir.wor
 
 ### 典型流程
 
-1. `describe_format` → `get_example`
+1. `describe_format` → `get_example`（想手写 JSON 再 `get_schema`）
 2. 写草图（直接写 JSON，或写 TS 配置再用命令行 `build` 求值）
 3. `check_sketch` 直到 `ok`
 4. 🔒 `publish_sketch {live:false}` → `verify_sketch`（线上真浏览器）→ 通过了 `promote_sketch` → 把 `url` 发给客户；改了再来一遍，地址不变

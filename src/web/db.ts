@@ -6,7 +6,7 @@
  * 而不是和新种子混在一起（旧数据的字段形状对不上新模型，渲染会莫名其妙缺东西）。
  */
 import type { Row, Sketch } from "../shared/schema.ts";
-import { scalar } from "../shared/scalar.ts";
+import { matchesWhere, type WhereScope } from "../shared/where.ts";
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const fnv = (str: string) => {
@@ -96,23 +96,11 @@ export const query = (
   db: Db,
   type: string,
   where: Record<string, string> | undefined,
-  scope: { params: Record<string, string>; record?: Row },
+  scope: WhereScope,
   keyOf: (t: string) => string,
   notSelf = false,
 ): Row[] => {
-  let list = db.list(type);
-  for (const [field, v] of Object.entries(where ?? {})) {
-    const want = v.startsWith(":")
-      ? (scope.params[v.slice(1)] ?? "")
-      : v.startsWith("$")
-        ? scalar(scope.record?.[v.slice(1)])
-        : v;
-    list = list.filter((r) =>
-      Array.isArray(r[field])
-        ? (r[field] as unknown[]).map(String).includes(want)
-        : scalar(r[field]) === want,
-    );
-  }
+  let list = db.list(type).filter((r) => matchesWhere(r, where, scope));
   if (notSelf && scope.record) {
     const k = keyOf(type);
     list = list.filter((r) => r[k] !== scope.record![k]);

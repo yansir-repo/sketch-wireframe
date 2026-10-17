@@ -720,16 +720,12 @@ dialog .actions {
   padding: 2px 0;
 }
 
-/* 导航收起：项多（>7，.many）或窄屏——收进一个手绘的菜单按钮，点开是一列 */
-.nav.many .nav-toggle {
+/* 导航收起：放不下（.collapsed，由 mount.ts 量出来）或窄屏——收进一个手绘的菜单按钮，点开是一列 */
+.nav.collapsed .nav-toggle {
   display: inline-block;
 }
-.nav.many .nav-links,
-.nav.many.open .nav-links {
+.nav.collapsed .nav-links {
   display: none;
-}
-.nav.many.open .nav-links {
-  display: flex;
 }
 @media (max-width: 720px) {
   .nav .nav-toggle {
@@ -738,11 +734,9 @@ dialog .actions {
   .nav .nav-links {
     display: none;
   }
-  .nav.open .nav-links {
-    display: flex;
-  }
 }
 .nav.open .nav-links {
+  display: flex;
   flex-direction: column;
   gap: 8px;
   position: absolute;
@@ -784,4 +778,8 @@ dialog .actions {
 .facts a {
   text-decoration: underline;
   text-decoration-style: dotted;
+}
+
+.grp.row > .brand {
+  flex: 0 0 auto;
 }

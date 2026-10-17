@@ -5,7 +5,7 @@
 
 ## For agents: start here
 
-- Open MCP, no credential: POST {{origin}}/mcp — tools `describe_format`, `get_example`, `check_sketch`.
+- Open MCP, no credential: POST {{origin}}/mcp — tools `describe_format` (plain markdown), `get_example` (plain TypeScript source), `get_schema` (JSON Schema, large, only for hand-written JSON), `check_sketch`.
 - Operator MCP, Cloudflare Access service token: POST {{origin}}/admin/mcp — adds `publish_sketch`, `verify_sketch`, `promote_sketch`, `list_sketches`, `get_sketch`, `sketch_versions`, `remove_sketch`, `rotate_key`.
 - Flow: `describe_format` → `get_example` → `check_sketch` until ok → `publish_sketch {live:false}` → `verify_sketch` (real browser) → `promote_sketch`. The link never changes for a given project code.
 - CLI: `scripts/do.ts` in the repo; `ship` runs the whole flow and leaves the live version untouched if verification fails.

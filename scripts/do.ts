@@ -84,7 +84,7 @@ const call = (
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   }).then((r) => r.json() as Promise<RpcReply>);
 
-const OPEN = new Set(["describe_format", "get_example", "check_sketch"]);
+const OPEN = new Set(["describe_format", "get_schema", "get_example", "check_sketch"]);
 
 /** One tool call that reports failure instead of exiting (ship needs to decide what a failure means). */
 const attempt = async (
@@ -111,7 +111,8 @@ const tool = async (name: string, args: Record<string, unknown>): Promise<unknow
   return r.value;
 };
 
-const print = (v: unknown) => console.log(JSON.stringify(v, null, 2));
+/** 字符串结果（指南、范例源码）原样打印，其余是 JSON。 */
+const print = (v: unknown) => console.log(typeof v === "string" ? v : JSON.stringify(v, null, 2));
 
 const printReport = (r: ReturnType<typeof checkSketch>) => {
   for (const e of r.errors) console.error(`✗ ${e}`);
@@ -208,6 +209,9 @@ switch (command) {
       url: string;
       version: number;
     };
+    console.error(
+      `已上线 v${live.version}（之前对外的是 ${staged.version ? `v${staged.version}` : "没有"}）`,
+    );
     print({ url: live.url, version: live.version });
     break;
   }

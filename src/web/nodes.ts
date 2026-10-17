@@ -48,10 +48,9 @@ const resolve = (fill: Fill, rc: RC): Resolved => {
   if (typeof fill === "string") return { kind: "val", v: fill };
   const head = fill.bind.split(".")[0]!;
   if (!rc.type || !rc.record) return { kind: "none" };
-  return {
-    kind: "val",
-    v: isEmpty(rc.record[head]) ? "" : display(rc.s, rc.db, rc.type, rc.record, head),
-  };
+  // 绑定的字段没有值 = 和“没填”同一个规矩：粗波浪线（作者可以把显示名留空，只留主键）
+  if (isEmpty(rc.record[head])) return { kind: "none" };
+  return { kind: "val", v: display(rc.s, rc.db, rc.type, rc.record, head) };
 };
 
 const seed = (rc: RC) => ++rc.seq.n;
@@ -125,7 +124,7 @@ const slot = (n: Slot, rc: RC): string => {
       const links = n.paths
         .map((p) => `<a href="#${esc(p)}" data-nav="${esc(p)}">${esc(pageName(rc, p))}</a>`)
         .join("");
-      return `<nav class="nav${n.paths.length > 7 ? " many" : ""}"><button type="button" class="btn small nav-toggle" data-rough="btn" data-seed="${seed(rc)}" data-act="nav-toggle">☰ ${esc(strings(rc.s.locale).menu)}</button><div class="nav-links">${links}</div></nav>`;
+      return `<nav class="nav"><button type="button" class="btn small nav-toggle" data-rough="btn" data-seed="${seed(rc)}" data-act="nav-toggle">☰ ${esc(strings(rc.s.locale).menu)}</button><div class="nav-links">${links}</div></nav>`;
     }
 
     case "collection": {
@@ -162,6 +161,8 @@ const slot = (n: Slot, rc: RC): string => {
       if (!rc.type || !rc.record) return "";
       const def = rc.s.model[rc.type]!;
       const rows: string[] = [];
+      // 客户页不摆空字段——但整块都是空的就不能留一条光秃秃的线：那时把字段都摆出来，值是波浪线（结构还在）
+      const emptyRows: string[] = [];
       // 没填的值 = 粗波浪线（和槽的“没填”同一个规矩）：表里的具体数据不用编，客户也无从纠结
       const valueHtml = (v: string) =>
         rc.fid === "lines" || v === ""
@@ -169,11 +170,18 @@ const slot = (n: Slot, rc: RC): string => {
           : `<span data-copy>${esc(v)}</span>`;
       const row = (k: string, v: string) =>
         `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+      const placeholder = (k: string) => row(k, sq(rc, [70], 5, "in", "width:110px"));
       for (const name of factFields(rc.s, rc.type, n)) {
         const fd = def.fields[name]!;
         const raw = rc.record[name];
         if (fd.kind === "list" && fd.kv) {
           const [kc, vc] = Object.keys(fd.columns!);
+          // 一行参数都没有：这块是“一张参数表”，摆三行波浪线的名/值示意（只在整块都空时才用）
+          if (isEmpty(raw))
+            for (let i = 0; i < 3; i++)
+              emptyRows.push(
+                `<div class="fact"><div class="k">${sq(rc, [60], 3, "in", "width:70px")}</div><div class="v">${valueHtml("")}</div></div>`,
+              );
           for (const r of (raw as Row[] | undefined) ?? []) {
             const k = scalar(r[kc!]);
             const v = scalar(r[vc!]);
@@ -195,6 +203,7 @@ const slot = (n: Slot, rc: RC): string => {
             )
             .filter(Boolean);
           if (rc.fid === "lines") rows.push(row(fd.label, sq(rc, [90, 60], 3, "in")));
+          else if (!items.length) emptyRows.push(placeholder(fd.label));
           else if (items.length)
             rows.push(
               row(
@@ -204,7 +213,10 @@ const slot = (n: Slot, rc: RC): string => {
             );
           continue;
         }
-        if (rc.fid === "words" && isEmpty(raw)) continue; // 客户看的页面不摆空字段
+        if (rc.fid === "words" && isEmpty(raw)) {
+          emptyRows.push(placeholder(fd.label));
+          continue;
+        }
         if (fd.kind === "ref" && fd.to && !isEmpty(raw)) {
           // 关系：显示对方的显示名，能点过去的就是链接
           const to = fd.to;
@@ -231,7 +243,7 @@ const slot = (n: Slot, rc: RC): string => {
         const v = isEmpty(raw) ? "" : display(rc.s, rc.db, rc.type, rc.record, name);
         rows.push(row(fd.label, valueHtml(v)));
       }
-      return `<div class="facts">${rows.join("")}</div>`;
+      return `<div class="facts">${(rows.length ? rows : emptyRows).join("")}</div>`;
     }
 
     case "badges": {

@@ -7,6 +7,7 @@
 import { pagesOf } from "./derive.ts";
 import { factFields } from "./facts.ts";
 import type { Node, Sketch } from "./schema.ts";
+import { matchesWhere } from "./where.ts";
 
 const MAX_NAV = 7;
 const MAX_FIELDS = 25;
@@ -144,6 +145,29 @@ export const qualityWarnings = (s: Sketch): string[] => {
     page.body.forEach((b, i) =>
       walkNodes(b, type, `${at}.body[${i}]`, (n, _t, where) => {
         if ("group" in n || n.slot !== "collection") return;
+        if (n.where && Object.values(n.where).some((v) => v.startsWith("$"))) {
+          // 关系查询在每一条种子记录上都查不到东西 = 这个板块在演示里永远是空的：种子要让相关的记录真的互相关联
+          const own = s.model[type]!;
+          const target = s.model[n.type];
+          const visible = (r: Record<string, unknown>) =>
+            !Object.entries(target?.unlisted ?? {}).some(([f, v]) => r[f] === v);
+          if (target && own.seed.length > 0) {
+            const hits = own.seed.map(
+              (rec) =>
+                target.seed.filter(
+                  (r) =>
+                    visible(r) &&
+                    matchesWhere(r, n.where, { params: {}, record: rec }) &&
+                    !(n.notSelf && n.type === type && r[own.key] === rec[own.key]),
+                ).length,
+            );
+            if (hits.every((h) => h === 0))
+              warn(
+                where,
+                `${n.type} 集合的 where 在每一条 ${type} 种子记录上都查不到记录：这个板块演示时永远是空的——种子里要让相关的记录真的互相关联（每个分组至少两条）`,
+              );
+          }
+        }
         if (!n.where)
           warn(
             where,

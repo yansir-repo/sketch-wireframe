@@ -72,6 +72,22 @@ export const mount = (sketch: Sketch): void => {
   // ---- 壳子 ----
   document.title = sketch.title;
   document.documentElement.style.setProperty("--rowline", `url("${rowLineSrc()}")`);
+  /** 导航放不下就收起：量一量链接排了几行——不靠项数猜。 */
+  const fitNavs = () => {
+    document.querySelectorAll<HTMLElement>("nav.nav").forEach((nav) => {
+      nav.classList.remove("collapsed", "open");
+      const links = nav.querySelector<HTMLElement>(".nav-links");
+      const first = links?.querySelector<HTMLElement>("a");
+      if (
+        links &&
+        first &&
+        links.offsetParent !== null &&
+        links.offsetHeight > first.offsetHeight * 1.7
+      )
+        nav.classList.add("collapsed");
+    });
+  };
+
   const renderChrome = () => {
     $("#header-body").innerHTML = node(sketch.header, rcFor());
     $("#footer-body").innerHTML = node(sketch.footer, rcFor());
@@ -145,8 +161,14 @@ export const mount = (sketch: Sketch): void => {
         if (!rec || !db.visible(ctx.type, rec)) return { html: notFound(), title: "404" };
         rc = { ...rc, type: ctx.type, record: rec };
         title = recordTitle(sketch, db, ctx.type, rec);
+        // 分类面包屑只在“那个词表条目页列的就是这个类型”时用（首页 / 产品分类 / 三辊闸 / A106）；
+        // 否则是这个类型自己的列表页（首页 / 案例 / case-01）——不能把案例挂到别的栏目名下
+        const lists = (to: string | undefined) => {
+          const c = to ? pages[`/${to}/:id`]?.ctx : undefined;
+          return !!c && c.many === true && c.type === ctx.type;
+        };
         const cls = Object.entries(def.fields).find(
-          ([, fd]) => fd.kind === "term" && !fd.multiple && pages[`/${fd.to}/:id`],
+          ([, fd]) => fd.kind === "term" && !fd.multiple && lists(fd.to),
         );
         if (cls) {
           const [name, fd] = cls;
@@ -156,6 +178,8 @@ export const mount = (sketch: Sketch): void => {
           if (id)
             trail.push([vocabLabel(sketch, db, fd.to!, id), `/${fd.to}/${encodeURIComponent(id)}`]);
         }
+        if (!cls && pages[`/${ctx.type}`])
+          trail.push([pages[`/${ctx.type}`]!.name ?? def.label, `/${ctx.type}`]);
         trail.push([String(title)]);
       }
     } else if (m.pattern !== "/") trail.push([String(title)]);
@@ -190,6 +214,7 @@ export const mount = (sketch: Sketch): void => {
 
   const rerenderAll = () => {
     renderChrome();
+    requestAnimationFrame(fitNavs);
     render();
     requestAnimationFrame(() => drawAll(document.body));
   };
@@ -345,10 +370,17 @@ export const mount = (sketch: Sketch): void => {
   let t: number | undefined;
   window.addEventListener("resize", () => {
     clearTimeout(t);
-    t = window.setTimeout(() => drawAll(document.body), 200);
+    t = window.setTimeout(() => {
+      fitNavs();
+      drawAll(document.body);
+    }, 200);
   });
-  void document.fonts?.ready.then(() => drawAll(document.body));
-  window.addEventListener("load", () => setTimeout(() => drawAll(document.body), 400));
+  const settle = () => {
+    fitNavs();
+    drawAll(document.body);
+  };
+  void document.fonts?.ready.then(settle);
+  window.addEventListener("load", () => setTimeout(settle, 400));
 
   // ---- 给验证器的口子：每个路由模式给出真实可访问的路径 ----
   const sampleRoutes = (): string[] => {
@@ -398,5 +430,5 @@ export const mount = (sketch: Sketch): void => {
 
   renderChrome();
   render();
-  requestAnimationFrame(() => drawAll(document.body));
+  requestAnimationFrame(settle);
 };
