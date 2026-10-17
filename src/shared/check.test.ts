@@ -119,3 +119,138 @@ describe("derived pages", () => {
     expect(pages["/product"]?.name).toBe("全部型号");
   });
 });
+
+describe("internal (back-office-only) fields", () => {
+  it("cannot be bound, filtered, shown as badges or listed in facts.only", () => {
+    const bind = fresh();
+    bind["pages"]["/product/:id"].body[1].group[0] = {
+      slot: "text",
+      size: 3,
+      fill: { bind: "status" },
+    };
+    expect(checkSketch(bind).errors.join("\n")).toContain("internal");
+    const only = fresh();
+    only["pages"]["/product/:id"].body[1].group[1].only = ["status"];
+    expect(checkSketch(only).errors.join("\n")).toContain("internal");
+    const filter = fresh();
+    filter["pages"]["/product"].body[0].group[0].group[0].fields = ["status"];
+    expect(checkSketch(filter).errors.join("\n")).toContain("internal");
+  });
+});
+
+describe("facts(only / skip) and ref", () => {
+  it("only and skip are exclusive; only must name real, showable fields", () => {
+    const both = fresh();
+    both["pages"]["/product/:id"].body[1].group[1] = {
+      slot: "facts",
+      only: ["category"],
+      skip: ["specs"],
+    };
+    expect(checkSketch(both).ok).toBe(false);
+    const ghost = fresh();
+    ghost["pages"]["/product/:id"].body[1].group[1] = { slot: "facts", only: ["nope"] };
+    expect(checkSketch(ghost).errors.join("\n")).toContain("nope");
+    const media = fresh();
+    media["pages"]["/product/:id"].body[1].group[1] = { slot: "facts", only: ["photos"] };
+    expect(checkSketch(media).ok).toBe(false);
+  });
+
+  it("a ref must point at a content type (not a vocabulary) and at records that exist", () => {
+    const toVocab = fresh();
+    toVocab["model"]["product"].fields["related"].to = "category";
+    expect(checkSketch(toVocab).errors.join("\n")).toContain("词表");
+    const dangling = fresh();
+    dangling["model"]["product"].seed[0].related = ["NOPE"];
+    expect(checkSketch(dangling).errors.join("\n")).toContain("NOPE");
+  });
+});
+
+describe("design-quality warnings (do not block publishing)", () => {
+  const warnings = (s: Record<string, any>) => checkSketch(s).warnings.join("\n"); // eslint-disable-line
+
+  it("warns when a nav has more than 7 entries", () => {
+    const s = fresh();
+    s["header"].group[1].paths = Array.from({ length: 8 }, () => "/");
+    expect(warnings(s)).toContain("导航有 8 项");
+  });
+
+  it("warns about fields no client page ever shows, and lets internal ones be", () => {
+    const s = fresh();
+    s["model"]["product"].fields["note"] = { kind: "text", label: "备注" };
+    expect(warnings(s)).toContain("note");
+    s["model"]["product"].fields["note"].internal = true;
+    expect(warnings(s)).not.toContain("note");
+  });
+
+  it("warns when two facts on one page show the same fields", () => {
+    const s = fresh();
+    s["pages"]["/product/:id"].body.push({
+      group: [{ slot: "facts", only: ["category", "materials"] }],
+      dir: "col",
+      name: "again",
+    });
+    expect(warnings(s)).toContain("显示完全相同的字段");
+  });
+
+  it("warns when a collection on a detail page has no where (shows everything, not related)", () => {
+    const s = fresh();
+    s["pages"]["/product/:id"].body.push({
+      group: [{ slot: "collection", type: "product", limit: 3 }],
+      dir: "col",
+      name: "x",
+    });
+    expect(warnings(s)).toContain("没有 where");
+  });
+
+  it("warns on placeholder / explanatory copy and on a back-office-looking field shown to clients", () => {
+    const s = fresh();
+    s["model"]["product"].seed[0].specs[0].value = "A placeholder used only for testing";
+    expect(warnings(s)).toContain("placeholder-copy");
+    const t = fresh();
+    t["model"]["product"].fields["verification_status"] = { kind: "text", label: "核实" };
+    t["pages"]["/product/:id"].body[1].group[1] = { slot: "facts" };
+    expect(warnings(t)).toContain("verification_status");
+  });
+
+  it("warns on thin data, a bloated model, an overloaded page and a logo built as an action", () => {
+    const thin = fresh();
+    thin["model"]["product"].seed = thin["model"]["product"].seed.slice(0, 2);
+    for (const r of thin["model"]["product"].seed) r.related = []; // the neighbours are gone: keep refs valid
+    expect(warnings(thin)).toContain("只有 2 条记录");
+    const bloated = fresh();
+    for (let i = 0; i < 26; i++)
+      bloated["model"]["product"].fields[`f${i}`] = {
+        kind: "text",
+        label: `F${i}`,
+        internal: true,
+      };
+    expect(warnings(bloated)).toContain("个字段（>25）");
+    const heavy = fresh();
+    heavy["pages"]["/"].body = Array.from({ length: 10 }, (_, i) => ({
+      group: [{ slot: "text", size: 3 }],
+      dir: "col",
+      name: `s${i}`,
+    }));
+    expect(warnings(heavy)).toContain("10 个顶层板块");
+    const logo = fresh();
+    logo["header"].group[0] = { slot: "action", fill: "ACME", to: "/" };
+    expect(warnings(logo)).toContain("brand()");
+  });
+
+  it("warns when the copy is English but no locale is set — and not when it is", () => {
+    const s = fresh();
+    type N = { group?: N[]; fill?: unknown };
+    const english = (n: N) => {
+      // eslint-disable-line
+      if (n.group) n.group.forEach(english);
+      else if (typeof n.fill === "string")
+        n.fill = "Request a quote for custom products made to your specification";
+    };
+    for (const p of Object.values<any>(s["pages"])) p.body.forEach(english); // eslint-disable-line
+    english(s["header"]);
+    english(s["footer"]);
+    expect(warnings(s)).toContain("locale");
+    s["locale"] = "en";
+    expect(warnings(s)).not.toContain("locale");
+  });
+});

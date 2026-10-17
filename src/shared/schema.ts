@@ -56,9 +56,16 @@ const collection = Schema.Struct({
   notSelf: Schema.optionalKey(Schema.Boolean),
   w: Weight,
 });
+const brand = Schema.Struct({
+  slot: Schema.Literal("brand"),
+  fill: Fill,
+  to: Schema.optionalKey(Schema.String),
+  w: Weight,
+});
 const facts = Schema.Struct({
   slot: Schema.Literal("facts"),
   skip: Schema.optionalKey(Schema.Array(Schema.String)),
+  only: Schema.optionalKey(Schema.Array(Schema.String)),
   w: Weight,
 });
 const badges = Schema.Struct({ slot: Schema.Literal("badges"), field: Schema.String, w: Weight });
@@ -71,6 +78,7 @@ const filters = Schema.Struct({
 const form = Schema.Struct({ slot: Schema.Literal("form"), w: Weight });
 
 export const SLOT_KINDS = [
+  "brand",
   "text",
   "image",
   "action",
@@ -90,6 +98,7 @@ const Slot = Schema.Union([
   text,
   image,
   action,
+  brand,
   nav,
   collection,
   facts,
@@ -127,8 +136,20 @@ export const Option = Schema.Union([
 ]);
 export type Option = typeof Option.Type;
 
-export const FIELD_KINDS = ["text", "number", "bool", "choice", "term", "media", "list"] as const;
+export const FIELD_KINDS = [
+  "text",
+  "number",
+  "bool",
+  "choice",
+  "term",
+  "ref",
+  "media",
+  "list",
+] as const;
 export type FieldKind = (typeof FIELD_KINDS)[number];
+
+/** 存 id（或 id 数组）、指向另一个类型的记录的字段：term 指向词表，ref 指向内容类型。存储、表单、筛选是同一套。 */
+export const isLinkKind = (k: FieldKind): boolean => k === "term" || k === "ref";
 
 export const Field = Schema.Struct({
   kind: Schema.Literals(FIELD_KINDS),
@@ -139,7 +160,7 @@ export const Field = Schema.Struct({
   /** choice 的选项。 */
   options: Schema.optionalKey(Schema.Array(Option)),
   radio: Schema.optionalKey(Schema.Boolean),
-  /** term 引用的词表类型。 */
+  /** term 引用的词表类型；ref 引用的内容类型。 */
   to: Schema.optionalKey(Schema.String),
   /** list：每行的列（列名 → 显示名）；kv=true 时第一列当名、第二列当值，在 facts 里展开成行。 */
   columns: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
@@ -148,6 +169,8 @@ export const Field = Schema.Struct({
   table: Schema.optionalKey(Schema.Boolean),
   /** false = 不进 facts（客户看的规格里不摆）。 */
   detail: Schema.optionalKey(Schema.Boolean),
+  /** true = 只给后台（运营、审核流程用的字段）：任何客户页面都不能展示它，公开表单里也没有；后台表格和表单里有。 */
+  internal: Schema.optionalKey(Schema.Boolean),
 });
 export type Field = typeof Field.Type;
 
@@ -203,6 +226,8 @@ export const Sketch = Schema.Struct({
   title: Schema.String,
   /** 文案保真度：lines = 所有文案画成线条（只表达结构），words = 写了的文案照写（没写的仍是线条）。默认 words。 */
   fidelity: Schema.optionalKey(Fidelity),
+  /** 引擎自带的、客户会看到的文案（面包屑、空状态、“更多”、菜单……）用哪种语言。默认 zh；英文站写 "en"。后台（#/_model）始终是中文。 */
+  locale: Schema.optionalKey(Schema.Literals(["zh", "en"])),
   model: Schema.Record(Schema.String, TypeDef),
   header: NodeSchema,
   footer: NodeSchema,

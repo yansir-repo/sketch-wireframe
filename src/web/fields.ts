@@ -8,6 +8,7 @@ import type { Db } from "./db.ts";
 import { esc, asOption, titleField } from "./fmt.ts";
 import type { Field, Row, Sketch } from "../shared/schema.ts";
 import { scalar } from "../shared/scalar.ts";
+import { strings, ZH, type Strings } from "./strings.ts";
 
 export const MAX_PHOTOS = 6;
 const KEY_RE = /^[A-Za-z0-9._-]+$/;
@@ -15,7 +16,11 @@ const rid = () => "r" + Math.random().toString(36).slice(2, 8);
 
 type Photo = { dataUrl: string; caption?: string };
 
-export const listRowHtml = (columns: Record<string, string>, row: Row = {}): string => `
+export const listRowHtml = (
+  columns: Record<string, string>,
+  row: Row = {},
+  L: Strings = ZH,
+): string => `
   <div class="lrow" data-row-id="${esc(row.row_id ?? rid())}">
     ${Object.entries(columns)
       .map(
@@ -23,12 +28,12 @@ export const listRowHtml = (columns: Record<string, string>, row: Row = {}): str
           `<wired-input data-col="${esc(c)}" placeholder="${esc(label)}" value="${esc(row[c] ?? "")}"></wired-input>`,
       )
       .join("")}
-    <a href="#" data-act="del-row">删除</a>
+    <a href="#" data-act="del-row">${esc(L.delete)}</a>
   </div>`;
 
-export const photoHtml = (p: Photo): string => `
+export const photoHtml = (p: Photo, L: Strings = ZH): string => `
   <div class="pv" data-photo data-src="${esc(p.dataUrl)}" data-caption="${esc(p.caption ?? "")}">
-    <img src="${esc(p.dataUrl)}" alt=""><a href="#" data-act="photo-del">移除</a>
+    <img src="${esc(p.dataUrl)}" alt=""><a href="#" data-act="photo-del">${esc(L.remove)}</a>
   </div>`;
 
 /** 上传的图片先在浏览器里压成 JPEG（长边 ≤800px），否则一张手机原图就能把 localStorage 的配额吃光；透明 PNG 先垫白底。 */
@@ -62,6 +67,7 @@ const control = (
   fd: Field,
   value: unknown,
   disabled: boolean,
+  L: Strings,
 ): string => {
   const dis = disabled ? " disabled" : "";
   switch (fd.kind) {
@@ -79,7 +85,8 @@ const control = (
         ? `<wired-radio-group selected="${esc(value ?? opts[0]?.value ?? "")}">${opts.map((o) => `<wired-radio name="${esc(o.value)}">${esc(o.label)}</wired-radio>`).join("")}</wired-radio-group>`
         : `<wired-combo selected="${esc(value ?? "")}">${opts.map((o) => `<wired-item value="${esc(o.value)}">${esc(o.label)}</wired-item>`).join("")}</wired-combo>`;
     }
-    case "term": {
+    case "term":
+    case "ref": {
       const target = s.model[fd.to!]!;
       const opts = db.all(fd.to!).map((r) => ({
         value: String(r[target.key]),
@@ -89,22 +96,22 @@ const control = (
         const on = new Set((Array.isArray(value) ? value : []).map(String));
         return `<div class="checks">${opts.map((o) => `<wired-checkbox data-value="${esc(o.value)}" ${on.has(o.value) ? "checked" : ""}>${esc(o.label)}</wired-checkbox>`).join("")}</div>`;
       }
-      return `<wired-combo selected="${esc(value ?? "")}"><wired-item value="">（未选）</wired-item>${opts.map((o) => `<wired-item value="${esc(o.value)}">${esc(o.label)}</wired-item>`).join("")}</wired-combo>`;
+      return `<wired-combo selected="${esc(value ?? "")}"><wired-item value="">${esc(L.unselected)}</wired-item>${opts.map((o) => `<wired-item value="${esc(o.value)}">${esc(o.label)}</wired-item>`).join("")}</wired-combo>`;
     }
     case "media": {
       const photos = (Array.isArray(value) ? value : []) as Photo[];
       return `<div data-media>
-        <div class="pvs">${photos.map(photoHtml).join("")}</div>
-        <button type="button" class="btn small" data-rough="btn" data-seed="12" data-act="pick-photos">上传图片</button>
+        <div class="pvs">${photos.map((p) => photoHtml(p, L)).join("")}</div>
+        <button type="button" class="btn small" data-rough="btn" data-seed="12" data-act="pick-photos">${esc(L.uploadImages)}</button>
         <input type="file" accept="image/*" multiple hidden data-photo-input>
-        <span class="hint">最多 ${MAX_PHOTOS} 张，浏览器里压成小图，只存在这台设备</span>
+        <span class="hint">${esc(L.maxPhotosHint(MAX_PHOTOS))}</span>
       </div>`;
     }
     case "list": {
       const rows = (Array.isArray(value) ? value : []) as Row[];
       return `<div data-list data-columns="${esc(JSON.stringify(fd.columns))}">
-        ${rows.map((r) => listRowHtml(fd.columns!, r)).join("")}
-        <a href="#" class="pill" data-rough="pill" data-seed="13" data-act="add-row">+ 加一行</a>
+        ${rows.map((r) => listRowHtml(fd.columns!, r, L)).join("")}
+        <a href="#" class="pill" data-rough="pill" data-seed="13" data-act="add-row">${esc(L.addRow)}</a>
       </div>`;
     }
   }
@@ -117,8 +124,10 @@ export const renderField = (
   fd: Field,
   value: unknown,
   disabled = false,
+  L: Strings = strings(s.locale),
+  note = "",
 ): string =>
-  `<div class="field" data-field="${esc(name)}" data-kind="${fd.kind}"><div class="fl">${esc(fd.label)}</div><div class="fc">${control(s, db, name, fd, value, disabled)}</div></div>`;
+  `<div class="field" data-field="${esc(name)}" data-kind="${fd.kind}"><div class="fl">${esc(fd.label)}${note ? ` <span class="hint">${esc(note)}</span>` : ""}</div><div class="fc">${control(s, db, name, fd, value, disabled, L)}</div></div>`;
 
 export const readField = (container: Element | Document, name: string, fd: Field): unknown => {
   const wrap = container.querySelector(`[data-field="${name}"]`);
@@ -142,6 +151,7 @@ export const readField = (container: Element | Document, name: string, fd: Field
         ? ((wrap.querySelector("wired-radio-group") as { selected?: string }).selected ?? "")
         : ((wrap.querySelector("wired-combo") as { selected?: string }).selected ?? "");
     case "term":
+    case "ref":
       return fd.multiple
         ? [...wrap.querySelectorAll<HTMLElement & { checked?: boolean }>("wired-checkbox")]
             .filter((c) => c.checked)
@@ -179,17 +189,30 @@ export const renderForm = (
 ): string => {
   const def = s.model[type]!;
   const editing = row !== null;
+  // 后台界面永远是中文；公开表单跟着草图的 locale
+  const L = mode === "model" ? ZH : strings(s.locale);
   const fields = Object.entries(def.fields)
     .filter(([name]) => !(name === def.key && autoKey(s, type) && !editing))
+    // 只给后台的字段：访客的公开表单里没有它
+    .filter(([, fd]) => mode === "model" || fd.internal !== true)
     .map(([name, fd]) =>
-      renderField(s, db, name, fd, row ? row[name] : undefined, name === def.key && editing),
+      renderField(
+        s,
+        db,
+        name,
+        fd,
+        row ? row[name] : undefined,
+        name === def.key && editing,
+        L,
+        fd.internal ? "（仅后台）" : "",
+      ),
     )
     .join("");
   const key = row ? String(row[def.key]) : "";
-  return `<div class="form" data-form data-type="${esc(type)}" data-editing="${esc(key)}" data-mode="${mode}">
+  return `<div class="form" data-form data-type="${esc(type)}" data-editing="${esc(key)}" data-mode="${mode}" data-lang="${mode === "model" ? "zh" : (s.locale ?? "zh")}">
     ${fields}
     <div class="actions">
-      <button type="button" class="btn" data-rough="btn" data-seed="9" data-act="submit">${mode === "public" ? "提交" : editing ? "保存修改" : "新增保存"}</button>
+      <button type="button" class="btn" data-rough="btn" data-seed="9" data-act="submit">${mode === "public" ? esc(L.submit) : editing ? "保存修改" : "新增保存"}</button>
       ${mode === "model" ? `<a class="btn ghost" data-rough="btn" data-seed="10" href="#/_model/${esc(type)}">取消</a>` : ""}
     </div>
   </div>`;
@@ -205,6 +228,7 @@ export const collectRow = (
   type: string,
   form: Element | Document,
   editingKey: string,
+  L: Strings = strings(s.locale),
 ): SubmitResult => {
   const def = s.model[type]!;
   const existing = editingKey ? db.find(type, editingKey) : undefined;
@@ -218,13 +242,13 @@ export const collectRow = (
   else if (autoKey(s, type)) row[def.key] = db.nextId(type);
   else {
     const k = scalar(readField(form, def.key, def.fields[def.key]!));
-    if (!k) return { ok: false, message: `${def.fields[def.key]!.label}不能为空` };
+    if (!k) return { ok: false, message: L.required(def.fields[def.key]!.label) };
     if (!KEY_RE.test(k))
       return {
         ok: false,
-        message: `${def.fields[def.key]!.label}会进网址，只能用字母、数字、点、下划线、横线`,
+        message: L.keyChars(def.fields[def.key]!.label),
       };
-    if (db.find(type, k)) return { ok: false, message: `${k} 已存在，换一个，或者去编辑它` };
+    if (db.find(type, k)) return { ok: false, message: L.exists(k) };
     row[def.key] = k;
   }
   return { ok: true, row, created: !editingKey };

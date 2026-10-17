@@ -24,9 +24,12 @@ export const checkSketch = (input: unknown): Report => {
     ...semantic.errors,
     ...red.filter((f) => f.level === "error").map((f) => `红线[${f.rule}] ${f.message}`),
   ];
+  // 同一句话重复几十遍（每条种子都命中）没有信息量：去重。
   const warnings = [
-    ...semantic.warnings,
-    ...red.filter((f) => f.level === "warn").map((f) => `[${f.rule}] ${f.message}`),
+    ...new Set([
+      ...semantic.warnings,
+      ...red.filter((f) => f.level === "warn").map((f) => `[${f.rule}] ${f.message}`),
+    ]),
   ];
   return { ok: errors.length === 0, errors, warnings, sketch };
 };

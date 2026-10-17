@@ -5,6 +5,7 @@
 import {
   action,
   badges,
+  brand,
   bind,
   col,
   collection,
@@ -54,6 +55,7 @@ const items = (c: string, codes: string[], start: number) =>
       materials: [MATERIALS[n % 4]!, ...(n % 3 === 0 ? [MATERIALS[(n + 1) % 4]!] : [])],
       certs: ["iso9001", ...(n % 2 === 0 ? ["fsc"] : []), ...(n % 5 === 0 ? ["reach"] : [])],
       photos: [],
+      related: [codes[(i + 1) % codes.length]!], // 同类里的下一个：演示 ref（相关型号）
       status: "上架",
       specs: ["尺寸", "重量", "包装"].map((key, k) => ({ row_id: `r${k + 1}`, key, value: "" })), // 没填 = 波浪线
     };
@@ -67,9 +69,11 @@ const product = defType("型号", {
     category: f.term("分类", "category", { table: true }),
     materials: f.term("材质", "material", { multiple: true }),
     certs: f.term("认证", "cert", { multiple: true, detail: false }),
+    related: f.ref("相关型号", "product", { multiple: true }),
     specs: f.list("技术参数", { key: "参数名", value: "参数值" }, { kv: true }),
     photos: f.media("型号图片"),
-    status: f.choice("上架状态", ["草稿", "上架"], { radio: true, table: true, detail: false }),
+    // 运营用的上架状态：只给后台（internal），客户页面和公开表单里都没有它
+    status: f.choice("上架状态", ["草稿", "上架"], { radio: true, table: true, internal: true }),
   },
   card: col(image(bind("photos")), text(3, bind("code"))),
   seed: [
@@ -99,7 +103,7 @@ export default defineSketch({
   model: { category, material, cert, product, inquiry },
 
   header: row(
-    image("LOGO"),
+    brand("示例文具"),
     nav("/", "/category", "/product", "/inquiry"),
     action("获取报价", "/inquiry"),
   ),
@@ -158,7 +162,9 @@ export default defineSketch({
       ctx: { type: "product" },
       body: [
         section("图库", gallery("photos")),
-        section("基本信息", text(1, bind("code")), facts()),
+        section("基本信息", text(1, bind("code")), facts({ only: ["category", "materials"] })),
+        section("技术参数", facts({ only: ["specs"] })),
+        section("相关型号", facts({ only: ["related"] })),
         section("认证与报价", row(badges("certs"), action("获取报价", "/inquiry"))),
         section(
           "同类型号",

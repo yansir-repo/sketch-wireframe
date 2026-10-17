@@ -3,6 +3,8 @@
  * 它展示的是“数据模型 + 行为”，不是页面结构，所以客户看不到入口：只有知道地址（#/_model）的人能进，给 agent 和设计师看结构、试增删改。
  * 真·CRUD：增删改立即生效、状态落 localStorage（见 db.ts）。
  */
+import { isLinkKind } from "../shared/schema.ts";
+import { ZH } from "./strings.ts";
 import type { Db } from "./db.ts";
 import { renderForm } from "./fields.ts";
 import { applySel, facetHtml, facetsOf, parseQuery, toQuery, type Sel } from "./facets.ts";
@@ -37,12 +39,12 @@ const erDiagram = (s: Sketch, db: Db): string => {
     const d = s.model[t]!;
     const rows = Object.entries(d.fields)
       .map(([n, f]) => {
-        if (f.kind === "term" && f.to && s.model[f.to]) links.push([`er-${t}`, `er-${f.to}`]);
-        const how =
-          f.kind === "term"
-            ? `${f.multiple ? "多选" : "单选"}→${s.model[f.to!]?.label ?? f.to}`
-            : (KIND[f.kind] ?? f.kind);
-        return `<div class="erf"><span>${esc(f.label)}${n === d.key ? " ★" : ""}</span><span class="hint">${esc(how)}</span></div>`;
+        if (isLinkKind(f.kind) && f.to && s.model[f.to] && f.to !== t)
+          links.push([`er-${t}`, `er-${f.to}`]);
+        const how = isLinkKind(f.kind)
+          ? `${f.multiple ? "多选" : "单选"}${f.kind === "ref" ? "引用" : ""}→${s.model[f.to!]?.label ?? f.to}`
+          : (KIND[f.kind] ?? f.kind);
+        return `<div class="erf"><span>${esc(f.label)}${n === d.key ? " ★" : ""}${f.internal ? ' <i class="hint">仅后台</i>' : ""}</span><span class="hint">${esc(how)}</span></div>`;
       })
       .join("");
     const tag = d.vocab ? "词表" : d.public ? "访客可提交" : "内容";
@@ -102,7 +104,7 @@ export const renderModelView = (s: Sketch, db: Db, parts: string[], qs = ""): Mo
         )
         .slice(0, 3);
   const facetFields = cols.filter(
-    (c) => ["term", "choice", "bool"].includes(def.fields[c]!.kind) && c !== def.key,
+    (c) => ["term", "ref", "choice", "bool"].includes(def.fields[c]!.kind) && c !== def.key,
   );
   const qp = new URLSearchParams(qs);
   const q = (qp.get("q") ?? "").trim();
@@ -120,7 +122,7 @@ export const renderModelView = (s: Sketch, db: Db, parts: string[], qs = ""): Mo
   const media = Object.entries(def.fields).find(([, fd]) => fd.kind === "media")?.[0];
   const text = (r: Record<string, unknown>) =>
     [def.key, ...cols]
-      .map((c) => display(s, db, type, r, c))
+      .map((c) => display(s, db, type, r, c, ZH))
       .join(" ")
       .toLowerCase();
   const hits = applySel(all, sel, facetFields).filter(
@@ -129,18 +131,21 @@ export const renderModelView = (s: Sketch, db: Db, parts: string[], qs = ""): Mo
   const pages = Math.max(1, Math.ceil(hits.length / PER));
   const page = Math.min(pages, Math.max(1, Number(qp.get("p")) || 1));
   let n = 0;
-  const facets = facetsOf(s, db, type, facetFields, all, sel);
+  const facets = facetsOf(s, db, type, facetFields, all, sel, ZH);
   const bar = facetHtml(facets, sel, {
     variant: "bar",
     words: true,
+    clear: ZH.clearFilters,
     seed: () => ++n + 500,
     href: (next) => hrefOf(next),
   });
   const cell = (r: Record<string, unknown>, c: string) => {
     const fd = def.fields[c]!;
     if (isEmpty(r[c])) return '<span class="dash">—</span>';
-    const v = esc(display(s, db, type, r, c));
-    return fd.kind === "term" || fd.kind === "choice" ? `<span class="tag">${v}</span>` : v;
+    const v = esc(display(s, db, type, r, c, ZH));
+    return fd.kind === "term" || fd.kind === "ref" || fd.kind === "choice"
+      ? `<span class="tag">${v}</span>`
+      : v;
   };
   const head = `<tr>${media ? "<th></th>" : ""}<th>${esc(def.fields[def.key]?.label ?? def.key)}</th>${cols.map((c) => `<th>${esc(def.fields[c]!.label)}</th>`).join("")}<th></th></tr>`;
   const body = hits

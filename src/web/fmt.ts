@@ -1,4 +1,5 @@
 /** 把记录里的值变成给人看的字符串：term 查词表名称，choice 查选项名称——存的是 id，显示的是名称。 */
+import { strings, type Strings } from "./strings.ts";
 import type { Field, Option, Row, Sketch } from "../shared/schema.ts";
 import type { Db } from "./db.ts";
 import { scalar } from "../shared/scalar.ts";
@@ -28,12 +29,20 @@ export const vocabLabel = (s: Sketch, db: Db, vocab: string, id: string): string
   return hit ? scalar(hit[titleField(s, vocab)] ?? id) : id;
 };
 
-export const display = (s: Sketch, db: Db, type: string, r: Row, name: string): string => {
+export const display = (
+  s: Sketch,
+  db: Db,
+  type: string,
+  r: Row,
+  name: string,
+  L: Strings = strings(s.locale),
+): string => {
   const fd: Field | undefined = s.model[type]?.fields[name];
   const v = r[name];
   if (!fd) return scalar(v);
   switch (fd.kind) {
-    case "term": {
+    case "term":
+    case "ref": {
       const ids = (Array.isArray(v) ? v : v == null || v === "" ? [] : [v]).map(String);
       return ids.map((id) => vocabLabel(s, db, fd.to!, id)).join(" / ");
     }
@@ -42,11 +51,11 @@ export const display = (s: Sketch, db: Db, type: string, r: Row, name: string): 
       return hit ? hit.label : scalar(v);
     }
     case "bool":
-      return v ? "是" : "否";
+      return v ? L.yes : L.no;
     case "media":
-      return Array.isArray(v) && v.length ? `${v.length} 张` : "";
+      return Array.isArray(v) && v.length ? L.photos(v.length) : "";
     case "list":
-      return Array.isArray(v) && v.length ? `${v.length} 行` : "";
+      return Array.isArray(v) && v.length ? L.rows(v.length) : "";
     default:
       return scalar(v);
   }

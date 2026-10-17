@@ -251,9 +251,15 @@ a {
 }
 
 .nav {
+  position: relative;
+}
+.nav-links {
   display: flex;
   gap: 18px;
   flex-wrap: wrap;
+}
+.nav-toggle {
+  display: none;
 }
 .nav a {
   padding: 2px 4px;
@@ -712,4 +718,70 @@ dialog .actions {
   font-size: 14px;
   border-top: 1px dotted var(--pencil);
   padding: 2px 0;
+}
+
+/* 导航收起：项多（>7，.many）或窄屏——收进一个手绘的菜单按钮，点开是一列 */
+.nav.many .nav-toggle {
+  display: inline-block;
+}
+.nav.many .nav-links,
+.nav.many.open .nav-links {
+  display: none;
+}
+.nav.many.open .nav-links {
+  display: flex;
+}
+@media (max-width: 720px) {
+  .nav .nav-toggle {
+    display: inline-block;
+  }
+  .nav .nav-links {
+    display: none;
+  }
+  .nav.open .nav-links {
+    display: flex;
+  }
+}
+.nav.open .nav-links {
+  flex-direction: column;
+  gap: 8px;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  min-width: 220px;
+  background: #fffefb;
+  border: 2px solid var(--line);
+  border-radius: 4px 14px 3px 12px / 12px 3px 14px 4px;
+  padding: 10px 16px;
+}
+
+/* 品牌（logo/字标） */
+.brand {
+  display: inline-block;
+  padding: 6px 14px;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: inherit;
+}
+
+/* 集合是一个整体（一个根元素），放进 row 里才是一个 flex 项 */
+.coll {
+  min-width: 0;
+}
+.coll .grid {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.facts .items {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.facts .items li {
+  margin: 2px 0;
+}
+.facts a {
+  text-decoration: underline;
+  text-decoration-style: dotted;
 }

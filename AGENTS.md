@@ -30,6 +30,12 @@
 - 验证有两个宿主、一份检查：`src/verify/core.ts`（页面从哪来不是它的事）。线上是 Browser Rendering（`remote.ts` → `browser.ts` 这个 Effect 服务 → MCP 的 `verify_sketch`），本机是 `scripts/verify.ts`。项目自己的流程脚本只能本机跑。
 - `src/worker/tsconfig.json` 带了 `DOM` lib，只因为 `src/verify` 里 `page.evaluate` 的回调要过类型检查；**Worker 代码不能用 DOM 全局**（编译器现在拦不住）。
 
+## 引擎的两条硬规矩（它们是 bug 的类，不是个案）
+
+- **每个槽只输出一个根元素**：槽放进 `row` 里就是一个 flex 项，输出两个并列元素会被拆开（集合的“共 N 个”曾卡在两组卡片中间）。`src/web/engine.test.ts` 对每种槽、两档保真度、空/截断/正常状态逐一断言。加新槽，先加进那张表。
+- **引擎自带的、客户会看到的文案只在 `src/web/strings.ts`**，由草图的 `locale` 选语言；`en` 的类型是 `typeof zh`，漏一个键编译器会说。**不要在别处写中文字面量给客户看**（后台 `#/_model` 是运营的界面，永远中文，走 `ZH`）。
+- “facts 显示哪些字段”只在 `src/shared/facts.ts`（引擎渲染和体检问的是同一个问题）；体检里“设计问题”类的提醒只在 `src/shared/quality.ts`。
+
 ## 分层
 
 - `src/shared/`：纯函数，不碰 DOM、不碰 Worker API（schema、dsl、derive、validate、redlines、check、scalar）。Worker、CLI、浏览器引擎三方共用。

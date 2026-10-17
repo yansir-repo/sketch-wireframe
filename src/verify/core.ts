@@ -292,6 +292,32 @@ export const runChecks = async (
       mobileOverflow.join("  "),
       "warn",
     );
+
+    // 窄屏导航：链接收起，菜单按钮点开能看到、再点一个链接就收回去
+    await go("#/");
+    const nav = await page.evaluate(() => {
+      const n = document.querySelector("#header-body nav.nav");
+      if (!n) return null;
+      const vis = (e: Element | null) => !!e && (e as HTMLElement).offsetParent !== null;
+      return {
+        toggle: vis(n.querySelector(".nav-toggle")),
+        links: vis(n.querySelector(".nav-links")),
+      };
+    });
+    if (nav) {
+      check("窄屏：导航收起，只剩菜单按钮", nav.toggle && !nav.links, JSON.stringify(nav));
+      await page.click("#header-body .nav-toggle");
+      await sleep(150);
+      const open = await page.evaluate(() => {
+        const l = document.querySelector("#header-body .nav-links");
+        return !!l && (l as HTMLElement).offsetParent !== null;
+      });
+      check("窄屏：点菜单按钮展开导航", open);
+      await page.click("#header-body .nav-links a");
+      await sleep(300);
+      const closed = await page.evaluate(() => !document.querySelector("#header-body nav.open"));
+      check("窄屏：点了导航项之后菜单收回去", closed);
+    }
     await page.setViewport({ width: 1100, height: 900 });
 
     // ---- 项目自己的流程 ----

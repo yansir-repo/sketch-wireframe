@@ -3,6 +3,8 @@
  * 一个事实一处：客户页的 filters 槽和模型视图的表格共用这里，选择状态只存在地址的 ?query 里（可分享、可回退、验证器能直接点）。
  * 语义：同一字段内多选 = 并集，不同字段之间 = 交集；选项旁的数字 = “在其余条件都满足的前提下，再选它会剩几个”。
  */
+import { isLinkKind } from "../shared/schema.ts";
+import { strings, type Strings } from "./strings.ts";
 import type { Db } from "./db.ts";
 import { keyOf, titleFieldOf } from "../shared/derive.ts";
 import { asOption, esc } from "./fmt.ts";
@@ -49,17 +51,18 @@ const optionsOf = (
   db: Db,
   type: string,
   field: string,
+  L: Strings,
 ): Array<{ value: string; label: string }> => {
   const fd = s.model[type]!.fields[field]!;
-  if (fd.kind === "term")
-    return db.all(fd.to!).map((r) => ({
+  if (isLinkKind(fd.kind))
+    return db.list(fd.to!).map((r) => ({
       value: String(r[keyOf(s, fd.to!)]),
       label: scalar(r[titleFieldOf(s, fd.to!)]),
     }));
   if (fd.kind === "choice") return (fd.options ?? []).map(asOption).filter((o) => o.value !== "");
   return [
-    { value: "true", label: "是" },
-    { value: "false", label: "否" },
+    { value: "true", label: L.yes },
+    { value: "false", label: L.no },
   ];
 };
 
@@ -71,10 +74,11 @@ export const facetsOf = (
   fields: ReadonlyArray<string>,
   base: Row[],
   sel: Sel,
+  L: Strings = strings(s.locale),
 ): Facet[] =>
   fields.flatMap((field) => {
     const others = applySel(base, sel, fields, field);
-    const options = optionsOf(s, db, type, field)
+    const options = optionsOf(s, db, type, field, L)
       .filter((o) => base.some((r) => has(r, field, o.value)))
       .map((o) => ({
         ...o,
@@ -98,7 +102,13 @@ export const toggled = (sel: Sel, field: string, value: string): Sel => {
 export const facetHtml = (
   facets: Facet[],
   sel: Sel,
-  o: { variant: "side" | "bar"; words: boolean; seed: () => number; href: (next: Sel) => string },
+  o: {
+    variant: "side" | "bar";
+    words: boolean;
+    clear: string;
+    seed: () => number;
+    href: (next: Sel) => string;
+  },
 ): string => {
   const any = Object.values(sel).some((v) => v.length);
   const groups = facets
@@ -115,7 +125,7 @@ export const facetHtml = (
     })
     .join("");
   const clear = any
-    ? `<a class="clear" href="${esc(o.href(Object.fromEntries(Object.keys(sel).map((k) => [k, []]))))}">清除筛选</a>`
+    ? `<a class="clear" href="${esc(o.href(Object.fromEntries(Object.keys(sel).map((k) => [k, []]))))}">${esc(o.clear)}</a>`
     : "";
   return `<div class="facets ${o.variant}" data-facets>${groups}${clear}</div>`;
 };

@@ -21,12 +21,13 @@ Page  = 路由 × 上下文 × Group     上下文 ∈ { 无, 集合 T[]（可�
 | `text(1\|2\|3, fill?)` | 一段文字（1 标题 / 2 副标题 / 3 正文） | 没填 = 粗波浪线 |
 | `image(fill?)` | 图片占位（叉框）；`bind("photos")` 显示上传的真图 | |
 | `action(fill?, to?, {ghost?})` | 按钮；`to` 是路由 | |
-| `nav(...paths)` | 导航，名字取自各路由的页面名 | |
+| `nav(...paths)` | 导航，名字取自各路由的页面名。项多（>7）或窄屏，引擎自动收进一个手绘的菜单按钮——怎么收是引擎的事 | |
+| `brand(fill?, to?)` | logo / 字标，点它回首页（默认 `/`）。**别用 `action` 做 logo**，那会渲染成按钮 | 没填 = 粗波浪线字标 |
 | `collection(type, {where?, limit?, notSelf?})` | 某类型的记录卡片网格 | `where` 的值：`":param"`（路由参数）、`"$field"`（当前记录的字段）、字面量 |
-| `facts({skip?})` | 当前记录的字段表（`kv` 列表展开成参数行） | 没有值的参数 = 粗波浪线 |
-| `badges(field)` | 多选 term 字段的圆圈标签 | |
+| `facts({skip?} \| {only?})` | 当前记录的字段表：`kv` 列表展开成参数行，普通列表每行一条，`ref` 显示成指向对方详情页的链接。`only` = 只要这些字段（按这个顺序），`skip` = 去掉这些（二选一）；**一页想分成几个板块，就每个板块写自己的 `only`**，别重复同一个 `facts()` | 没有值的参数 = 粗波浪线 |
+| `badges(field)` | 多选 term / ref 字段的圆圈标签 | |
 | `gallery(field)` | `media` 字段的图库 | |
-| `filters(...fields)` | 筛选（term / choice / bool 字段） | 字段由模型推出，这里只选哪些出现 |
+| `filters(...fields)` | 筛选（term / ref / choice / bool 字段） | 字段由模型推出，这里只选哪些出现 |
 | `form()` | 新增表单（上下文是“新增 T”时） | |
 
 ### 组（Group）
@@ -41,6 +42,7 @@ Page  = 路由 × 上下文 × Group     上下文 ∈ { 无, 集合 T[]（可�
 ### 没填的一律是粗波浪线
 
 槽没写 `fill`、`kv` 参数行没有值，都画成粗波浪线（“此处有文字”）。**宁可波浪线，也不要编数据**——客户不会纠结，seed 也不用造。
+`locale`（顶层）：`"zh"`（默认）或 `"en"`——引擎自带、客户会看到的文案（面包屑、空状态、“更多”、菜单、清除筛选、公开表单的按钮和提示）用哪种语言。**英文站必须写 `locale: "en"`**，否则这些会是中文；体检会提醒。后台（`#/_model`）始终是中文。
 `fidelity`（顶层）：`"words"`（默认）= 写了的文案照写；`"lines"` = 所有文案（含取自模型的值）都画成线条，只表达结构。
 
 ## 模型（数据结构，照 zeroY 的 shape 词汇）
@@ -54,6 +56,8 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 |---|---|
 | 有限集合、很多条目共用（分类、认证） | `vocab("名称", [["id","显示名"], …])`；记录里用 `f.term(label, "vocab 类型名", {multiple?})` 存 **id** |
 | 封闭单选 | `f.choice(label, options, {radio?})` |
+| 关系：相关产品、相关案例 | `f.ref(label, "另一个内容类型", {multiple?})`，存对方的主键。详情页用 `facts({only:["related"]})` 显示成链接；集合里用 `where` 查关系（如 `collection("case", {where:{products:"$slug"}})` = 提到当前产品的案例）。引用词表用 `term`，引用内容用 `ref` |
+| 只给后台的字段（审核状态、负责人、核实时间） | `{ internal: true }`：任何客户页面都不能展示它（绑定、facts、筛选、徽章都会被体检拦），公开表单里也没有；后台表格和表单里有 |
 | 可变长、每个记录自己的结构（技术参数） | `f.list(label, {key:"参数名", value:"参数值"}, {kv:true})`，每行带稳定的 `row_id`（不是下标） |
 | 图片 | `f.media(label)`（后台可上传，浏览器里压到长边 ≤800px） |
 | 访客可提交（询盘） | `defType(label, {public:true, …})` → 自动得到公开表单页，提交的记录出现在后台 |
@@ -87,3 +91,13 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 
 1. `describe_format`（本文 + JSON Schema）→ 2. `get_example` 看标准答案 → 3. 写草图 → 4. `check_sketch` 直到 `ok` →
 5. `publish_sketch`（需要运营凭证）→ 6. 把返回的 `url` 发给客户；改了再 `publish_sketch` 一次，同一个编号地址不变。
+
+## 体检会提醒的设计问题（不拦发布，但多半该改）
+
+- **导航 >7 项**：引擎会收进菜单，但这说明信息架构该合并或分组了。
+- **字段从来没出现在任何客户页面上**：要么加进页面，要么标 `internal: true`；没人看的字段不用建。名字像后台流程的字段（审核/核实状态……）出现在客户页上也会提醒。
+- **同一页里两个 `facts` 显示完全相同的字段**：用 `only` 把字段分给不同板块。
+- **详情页里的集合没有 `where`**：显示的是所有记录，不是“相关的”。
+- **占位或解释性文案**（placeholder、for testing、demo only、待填写……）：客户会读到它；没有资料依据的内容留空（波浪线），别写说明。
+- **记录太少（<4）**：列表、筛选、“相关”演示不出来。**字段太多（>25）**：多半是一段段的文字，那是页面里的内容，不是数据结构。**一页顶层板块 >9**。
+- **英文文案没设 `locale`**。**页眉第一个东西是回首页的 `action`**：logo 用 `brand()`。

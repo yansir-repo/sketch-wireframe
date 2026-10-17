@@ -3,7 +3,16 @@
  * 纯函数；Node（check.ts）和浏览器（引擎启动时）共用。error 会拦发布，warning 只提示。
  */
 import { matchRoute, pagesOf } from "./derive.ts";
-import { FIELD_KINDS, SLOT_KINDS, type Field, type Node, type Sketch } from "./schema.ts";
+import { factFields } from "./facts.ts";
+import { qualityWarnings } from "./quality.ts";
+import {
+  FIELD_KINDS,
+  SLOT_KINDS,
+  isLinkKind,
+  type Field,
+  type Node,
+  type Sketch,
+} from "./schema.ts";
 import { scalar } from "./scalar.ts";
 
 export type Report = { errors: string[]; warnings: string[] };
@@ -60,6 +69,8 @@ export const validate = (s: Sketch): Report => {
         const rt = needRecord();
         const head = String((fill as { bind: string }).bind).split(".")[0]!;
         if (rt && !fieldOf(rt, head)) err(at, `绑定的字段 "${head}" 不在类型 ${rt} 里`);
+        else if (rt && fieldOf(rt, head)?.internal)
+          err(at, `字段 "${head}" 是 internal（只给后台），不能出现在客户页面上`);
       }
     };
     switch (n.slot) {
@@ -75,6 +86,10 @@ export const validate = (s: Sketch): Report => {
         if (n.to !== undefined && !n.to.startsWith("/")) err(at, `to 要以 / 开头：${n.to}`);
         else if (n.to && !n.to.startsWith("/_model") && !matchRoute(patterns, n.to))
           err(at, `to 指向的路由 ${n.to} 没有对应页面`);
+        break;
+      case "brand":
+        checkFill(n.fill);
+        if (n.to !== undefined && !n.to.startsWith("/")) err(at, `to 要以 / 开头：${n.to}`);
         break;
       case "nav":
         for (const p of n.paths) if (!pages[p]) err(at, `nav 里的路由 ${p} 不是已有页面的路由模式`);
@@ -100,8 +115,18 @@ export const validate = (s: Sketch): Report => {
       }
       case "facts": {
         const rt = needRecord();
+        if (n.skip && n.only) err(at, "facts 的 skip 和 only 只能写一个");
         for (const k of n.skip ?? [])
           if (rt && !fieldOf(rt, k)) err(at, `skip 里的字段 ${k} 不在类型 ${rt} 里`);
+        for (const k of n.only ?? []) {
+          const fd = rt ? fieldOf(rt, k) : undefined;
+          if (rt && !fd) err(at, `only 里的字段 ${k} 不在类型 ${rt} 里`);
+          else if (fd?.internal)
+            err(at, `only 里的字段 ${k} 是 internal（只给后台），不能给客户看`);
+          else if (fd?.kind === "media")
+            err(at, `only 里的 ${k} 是图片字段：用 gallery 或 image(bind(...))`);
+        }
+        if (rt && n.only && factFields(s, rt, n).length === 0) err(at, "only 没有一个能显示的字段");
         break;
       }
       case "filters": {
@@ -114,19 +139,22 @@ export const validate = (s: Sketch): Report => {
         for (const name of n.fields) {
           const fd = fieldOf(rt, name);
           if (!fd) err(at, `filters 的字段 ${name} 不在类型 ${rt} 里`);
-          else if (!["term", "choice", "bool"].includes(fd.kind))
-            err(at, `filters 只能筛 term/choice/bool 字段，${name} 是 ${fd.kind}`);
+          else if (!["term", "ref", "choice", "bool"].includes(fd.kind))
+            err(at, `filters 只能筛 term/ref/choice/bool 字段，${name} 是 ${fd.kind}`);
+          else if (fd.internal) err(at, `filters 里的字段 ${name} 是 internal，不能给客户用`);
         }
         break;
       }
       case "badges":
       case "gallery": {
         const rt = needRecord();
-        const want = n.slot === "gallery" ? "media" : "term";
         const fd = rt ? fieldOf(rt, n.field) : undefined;
         if (rt && !fd) err(at, `${n.slot} 的字段 ${n.field} 不在类型 ${rt} 里`);
-        else if (fd && fd.kind !== want)
-          err(at, `${n.slot} 需要 ${want} 字段，${n.field} 是 ${fd.kind}`);
+        else if (fd && n.slot === "gallery" && fd.kind !== "media")
+          err(at, `gallery 需要 media 字段，${n.field} 是 ${fd.kind}`);
+        else if (fd && n.slot === "badges" && !isLinkKind(fd.kind))
+          err(at, `badges 需要 term/ref 字段，${n.field} 是 ${fd.kind}`);
+        else if (fd?.internal) err(at, `${n.slot} 的字段 ${n.field} 是 internal，不能给客户看`);
         break;
       }
       case "form":
@@ -153,6 +181,12 @@ export const validate = (s: Sketch): Report => {
           if (!fd.to || !s.model[fd.to]) err(fat, `term 引用的词表 "${fd.to}" 不存在`);
           else if (!s.model[fd.to]!.vocab) err(fat, `"${fd.to}" 不是词表（vocab）`);
         }
+        if (fd.kind === "ref") {
+          if (!fd.to || !s.model[fd.to]) err(fat, `ref 引用的类型 "${fd.to}" 不存在`);
+          else if (s.model[fd.to]!.vocab)
+            err(fat, `"${fd.to}" 是词表：引用词表用 term，ref 引用内容类型`);
+        }
+        if (fd.internal && name === def.key) err(fat, "主键不能是 internal");
         if (fd.kind === "choice" && !fd.options?.length) err(fat, "choice 需要 options");
         if (fd.kind === "list" && (!fd.columns || !Object.keys(fd.columns).length))
           err(fat, "list 需要 columns");
@@ -177,12 +211,12 @@ export const validate = (s: Sketch): Report => {
             warn(rat, `字段 ${name} 没在 fields 里声明`);
             continue;
           }
-          if (fd.kind === "term" && fd.to && s.model[fd.to]) {
+          if (isLinkKind(fd.kind) && fd.to && s.model[fd.to]) {
             const target = s.model[fd.to]!;
             const ids = new Set(target.seed.map((x) => String(x[target.key])));
             for (const id of Array.isArray(v) ? v : v === "" || v == null ? [] : [v])
               if (!ids.has(String(id)))
-                err(rat, `${name} 引用了词表 ${fd.to} 里没有的条目 "${id}"`);
+                err(rat, `${name} 引用了 ${fd.to} 里没有的条目 "${scalar(id)}"`);
           }
         }
       });
@@ -229,5 +263,6 @@ export const validate = (s: Sketch): Report => {
   if (s.footer) node(s.footer, "footer", { params: [] }, 1);
   else err("footer", "缺少 footer");
 
+  if (errors.length === 0) warnings.push(...qualityWarnings(s)); // 结构都不对时，“设计问题”没有意义
   return { errors, warnings };
 };

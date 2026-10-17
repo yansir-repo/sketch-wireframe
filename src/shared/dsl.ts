@@ -53,12 +53,22 @@ export const action = (fill?: Fill, to?: string, opts: { ghost?: boolean } = {})
   ...(to === undefined ? {} : { to }),
   ...(opts.ghost ? { ghost: true } : {}),
 });
+/** 品牌：logo 或字标，点它回首页。没填 = 粗波浪线字标。 */
+export const brand = (fill?: Fill, to = "/"): Slot => ({
+  slot: "brand",
+  ...(fill === undefined ? {} : { fill }),
+  to,
+});
 export const nav = (...paths: string[]): Slot => ({ slot: "nav", paths });
 export const collection = (
   type: string,
   opts: { where?: Record<string, string>; limit?: number; notSelf?: boolean } = {},
 ): Slot => ({ slot: "collection", type, ...opts });
-export const facts = (opts: { skip?: string[] } = {}): Slot => ({ slot: "facts", ...opts });
+/** 当前记录的字段表。skip = 去掉哪些；only = 只要哪些（按这个顺序）。一页里想分成几个板块，就每个板块写自己的 only。 */
+export const facts = (opts: { skip?: string[]; only?: string[] } = {}): Slot => ({
+  slot: "facts",
+  ...opts,
+});
 export const badges = (field: string): Slot => ({ slot: "badges", field });
 export const gallery = (field: string): Slot => ({ slot: "gallery", field });
 /** 筛选：字段由模型推出（term/choice/bool），这里只选哪些字段出现。 */
@@ -69,14 +79,20 @@ export const form = (): Slot => ({ slot: "form" });
 export const f = {
   text: (
     label: string,
-    o: { multiline?: boolean; table?: boolean; detail?: boolean } = {},
+    o: { multiline?: boolean; table?: boolean; detail?: boolean; internal?: boolean } = {},
   ): Field => ({ kind: "text", label, ...o }),
-  number: (label: string, o: { table?: boolean; detail?: boolean } = {}): Field => ({
+  number: (
+    label: string,
+    o: { table?: boolean; detail?: boolean; internal?: boolean } = {},
+  ): Field => ({
     kind: "number",
     label,
     ...o,
   }),
-  bool: (label: string, o: { table?: boolean; detail?: boolean } = {}): Field => ({
+  bool: (
+    label: string,
+    o: { table?: boolean; detail?: boolean; internal?: boolean } = {},
+  ): Field => ({
     kind: "bool",
     label,
     ...o,
@@ -84,15 +100,21 @@ export const f = {
   choice: (
     label: string,
     options: Option[],
-    o: { radio?: boolean; table?: boolean; detail?: boolean } = {},
+    o: { radio?: boolean; table?: boolean; detail?: boolean; internal?: boolean } = {},
   ): Field => ({ kind: "choice", label, options, ...o }),
   /** 引用词表里的条目；multiple 多选。 */
   term: (
     label: string,
     to: string,
-    o: { multiple?: boolean; table?: boolean; detail?: boolean } = {},
+    o: { multiple?: boolean; table?: boolean; detail?: boolean; internal?: boolean } = {},
   ): Field => ({ kind: "term", label, to, ...o }),
-  media: (label: string, o: { detail?: boolean } = {}): Field => ({
+  /** 引用另一个内容类型的记录（相关产品、相关案例）；存对方的主键，multiple 多选。详情页的 facts 里显示成指向它的链接。 */
+  ref: (
+    label: string,
+    to: string,
+    o: { multiple?: boolean; table?: boolean; detail?: boolean; internal?: boolean } = {},
+  ): Field => ({ kind: "ref", label, to, ...o }),
+  media: (label: string, o: { detail?: boolean; internal?: boolean } = {}): Field => ({
     kind: "media",
     label,
     multiple: true,
@@ -102,7 +124,7 @@ export const f = {
   list: (
     label: string,
     columns: Record<string, string>,
-    o: { kv?: boolean; detail?: boolean } = {},
+    o: { kv?: boolean; detail?: boolean; internal?: boolean } = {},
   ): Field => ({ kind: "list", label, columns, ...o }),
 };
 

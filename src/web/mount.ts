@@ -15,6 +15,7 @@ import { parseQuery } from "./facets.ts";
 import { createDb } from "./db.ts";
 import { matchRoute, pagesOf, referrersOf } from "../shared/derive.ts";
 import { drawAll, rowLineSrc } from "./draw.ts";
+import { strings, ZH } from "./strings.ts";
 import { collectRow, listRowHtml, MAX_PHOTOS, photoHtml, shrinkImage } from "./fields.ts";
 import { esc, recordTitle, titleField, vocabLabel } from "./fmt.ts";
 import { renderModelView } from "./model-view.ts";
@@ -94,8 +95,9 @@ export const mount = (sketch: Sketch): void => {
     return { path: p.startsWith("/") ? p : "/" + p, qs: i < 0 ? "" : raw.slice(i + 1) };
   };
 
-  const notFound = () =>
-    `<section class="grp col sec" data-notfound><span class="block-tag">404</span><div>页面不存在</div><a class="btn" data-rough="btn" data-seed="5" href="#/">返回首页</a></section>`;
+  // 客户页面的 404 跟着草图的 locale；后台（#/_model）永远是中文
+  const notFound = (L = strings(sketch.locale)) =>
+    `<section class="grp col sec" data-notfound><span class="block-tag">404</span><div>${esc(L.notFound)}</div><a class="btn" data-rough="btn" data-seed="5" href="#/">${esc(L.backHome)}</a></section>`;
 
   type Rendered = { html: string; title: string; pattern?: string };
 
@@ -106,7 +108,9 @@ export const mount = (sketch: Sketch): void => {
     const { path: p, qs } = loc();
     if (p === "/_model" || p.startsWith("/_model/")) {
       const mv = renderModelView(sketch, db, p.split("/").filter(Boolean).slice(1), qs);
-      return mv.notFound ? { html: notFound(), title: "404" } : { html: mv.html, title: mv.title };
+      return mv.notFound
+        ? { html: notFound(ZH), title: "404" }
+        : { html: mv.html, title: mv.title };
     }
     const m = matchRoute(patterns, p);
     if (!m) return { html: notFound(), title: "404" };
@@ -114,7 +118,8 @@ export const mount = (sketch: Sketch): void => {
     const ctx = page.ctx ?? null;
     let rc = rcFor({ params: m.params });
     let title = page.name ?? (ctx ? sketch.model[ctx.type]?.label : undefined) ?? m.pattern;
-    let trail: Array<[string, string?]> = [["首页", "/"]];
+    // 面包屑的根：首页自己的名字（作者起的），没起才用引擎的默认词
+    let trail: Array<[string, string?]> = [[pages["/"]?.name ?? strings(sketch.locale).home, "/"]];
 
     if (ctx) {
       const def = sketch.model[ctx.type]!;
@@ -201,12 +206,21 @@ export const mount = (sketch: Sketch): void => {
     $("#viewer-pos").textContent = `${viewerState.i + 1} / ${viewerState.srcs.length}`;
   };
 
+  // 点导航里的任何链接都收起菜单——包括指向当前页的那个（它不会触发 hashchange）
+  document.addEventListener("click", (e) => {
+    if ((e.target as Element).closest(".nav-links a"))
+      document.querySelectorAll("nav.open").forEach((x) => x.classList.remove("open"));
+  });
+
   document.addEventListener("click", (e) => {
     const el = (e.target as Element).closest<HTMLElement>("[data-act]");
     if (!el) return;
     const act = el.dataset.act!;
     if (el.tagName === "A") e.preventDefault();
     switch (act) {
+      case "nav-toggle":
+        el.closest("nav")?.classList.toggle("open");
+        break;
       case "view": {
         viewerState = { srcs: viewer.get(el.dataset.gid!) ?? [], i: Number(el.dataset.i) || 0 };
         if (!viewerState.srcs.length) break;
@@ -252,7 +266,14 @@ export const mount = (sketch: Sketch): void => {
         break;
       case "add-row": {
         const list = el.closest<HTMLElement>("[data-list]")!;
-        el.insertAdjacentHTML("beforebegin", listRowHtml(JSON.parse(list.dataset.columns!)));
+        el.insertAdjacentHTML(
+          "beforebegin",
+          listRowHtml(
+            JSON.parse(list.dataset.columns!),
+            {},
+            strings(el.closest<HTMLElement>("[data-form]")?.dataset.lang === "en" ? "en" : "zh"),
+          ),
+        );
         break;
       }
       case "del-row":
@@ -265,15 +286,12 @@ export const mount = (sketch: Sketch): void => {
           editing: string;
           mode: string;
         };
-        const res = collectRow(sketch, db, type, form, editing);
+        const L = mode === "public" ? strings(sketch.locale) : ZH;
+        const res = collectRow(sketch, db, type, form, editing, L);
         if (!res.ok) return toast(res.message);
-        if (!db.put(type, res.row))
-          return toast(
-            "浏览器存储空间满了，没保存：少传几张图，或去模型视图「重置为初始数据」腾地方",
-          );
+        if (!db.put(type, res.row)) return toast(L.storageFull);
         if (mode === "public") {
-          pendingToast =
-            "这是草图演示：已记录在这台设备上，不会真的发给任何人——正式表单在网站开发阶段接上";
+          pendingToast = L.demoSubmitted;
           render();
         } else {
           pendingToast = editing ? `已保存 ${editing}` : "已新增";
@@ -296,18 +314,21 @@ export const mount = (sketch: Sketch): void => {
     }
     if (!input.matches?.("input[data-photo-input]")) return;
     const pvs = input.closest("[data-media]")!.querySelector(".pvs")!;
+    const L = strings(
+      input.closest<HTMLElement>("[data-form]")?.dataset.lang === "en" ? "en" : "zh",
+    );
     for (const file of input.files ?? []) {
       if (pvs.querySelectorAll("[data-photo]").length >= MAX_PHOTOS) {
-        toast(`最多 ${MAX_PHOTOS} 张`);
+        toast(L.maxPhotos(MAX_PHOTOS));
         break;
       }
       try {
         pvs.insertAdjacentHTML(
           "beforeend",
-          photoHtml({ dataUrl: await shrinkImage(file), caption: file.name }),
+          photoHtml({ dataUrl: await shrinkImage(file), caption: file.name }, L),
         );
       } catch {
-        toast(`${file.name} 读不出来，换一张图片`);
+        toast(L.photoUnreadable(file.name));
       }
     }
     input.value = "";
@@ -316,6 +337,7 @@ export const mount = (sketch: Sketch): void => {
   let lastPath = loc().path;
   // 只有换了页面才回到顶部；同一页里改筛选/翻页不该把人弹回去
   window.addEventListener("hashchange", () => {
+    document.querySelectorAll("nav.open").forEach((x) => x.classList.remove("open"));
     render();
     if (loc().path !== lastPath) window.scrollTo(0, 0);
     lastPath = loc().path;

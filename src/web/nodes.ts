@@ -13,7 +13,9 @@ import { applySel, facetHtml, facetsOf, toQuery, type Sel } from "./facets.ts";
 import { display, esc, isEmpty, titleField } from "./fmt.ts";
 import { col, image, text } from "../shared/dsl.ts";
 import type { Fill, Node, Page, Row, Sketch, Slot } from "../shared/schema.ts";
+import { factFields } from "../shared/facts.ts";
 import { scalar } from "../shared/scalar.ts";
+import { strings } from "./strings.ts";
 
 export type Fidelity = "lines" | "words";
 
@@ -109,10 +111,25 @@ const slot = (n: Slot, rc: RC): string => {
         : `<span class="${cls}" data-rough="btn" data-seed="${seed(rc)}">${label}</span>`;
     }
 
-    case "nav":
-      return `<nav class="nav">${n.paths.map((p) => `<a href="#${esc(p)}" data-nav="${esc(p)}">${esc(pageName(rc, p))}</a>`).join("")}</nav>`;
+    case "brand": {
+      const r = resolve(n.fill, rc);
+      const label =
+        rc.fid === "words" && r.kind === "val" && r.v !== ""
+          ? `<span class="wm" data-copy>${esc(r.v)}</span>`
+          : `<span class="sq in" data-rough="sq" data-seed="${seed(rc)}" data-lines="100" data-t="5" style="width:120px;height:16px"></span>`;
+      return `<a class="brand" data-rough="frame" data-seed="${seed(rc)}" href="#${esc(n.to ?? "/")}">${label}</a>`;
+    }
+
+    case "nav": {
+      // 导航项多（>7）或窄屏：收进一个手绘的菜单按钮——怎么收是引擎的事，作者只写“有哪些页面”。
+      const links = n.paths
+        .map((p) => `<a href="#${esc(p)}" data-nav="${esc(p)}">${esc(pageName(rc, p))}</a>`)
+        .join("");
+      return `<nav class="nav${n.paths.length > 7 ? " many" : ""}"><button type="button" class="btn small nav-toggle" data-rough="btn" data-seed="${seed(rc)}" data-act="nav-toggle">☰ ${esc(strings(rc.s.locale).menu)}</button><div class="nav-links">${links}</div></nav>`;
+    }
 
     case "collection": {
+      const L = strings(rc.s.locale);
       const def = rc.s.model[n.type]!;
       let all = query(
         rc.db,
@@ -124,8 +141,9 @@ const slot = (n: Slot, rc: RC): string => {
       );
       if (n.type === rc.listType) all = applySel(all, rc.sel, Object.keys(rc.sel));
       const shown = all.slice(0, n.limit ?? 6);
+      // 每个槽只输出一个根元素：槽放进 row 里是一个 flex 项，输出两个并列元素会被拆开
       if (!shown.length)
-        return `<div class="empty">（${Object.values(rc.sel).some((v) => v.length) ? "没有符合条件的" : "还没有"}${esc(def.label)}）</div>`;
+        return `<div class="coll"><div class="empty">${esc(Object.values(rc.sel).some((v) => v.length) ? L.emptyFiltered(def.label) : L.empty(def.label))}</div></div>`;
       const card = def.card ?? col(image(), text(3, { bind: titleField(rc.s, n.type) }));
       const linkable = hasPage(rc, `/${n.type}/:id`);
       const cards = shown
@@ -137,31 +155,26 @@ const slot = (n: Slot, rc: RC): string => {
             : `<div ${attrs}>${inner}</div>`;
         })
         .join("");
-      return `<div class="grid">${cards}</div>${all.length > shown.length ? `<div class="more">… 共 ${all.length} 个</div>` : ""}`;
+      return `<div class="coll"><div class="grid">${cards}</div>${all.length > shown.length ? `<div class="more">${esc(L.more(all.length))}</div>` : ""}</div>`;
     }
 
     case "facts": {
       if (!rc.type || !rc.record) return "";
       const def = rc.s.model[rc.type]!;
-      const tf = titleField(rc.s, rc.type);
       const rows: string[] = [];
       // 没填的值 = 粗波浪线（和槽的“没填”同一个规矩）：表里的具体数据不用编，客户也无从纠结
       const valueHtml = (v: string) =>
         rc.fid === "lines" || v === ""
           ? sq(rc, v === "" ? [70] : lineFor(v, 3), v === "" ? 5 : 3, "in", "width:110px")
           : `<span data-copy>${esc(v)}</span>`;
-      for (const [name, fd] of Object.entries(def.fields)) {
-        if (
-          name === def.key ||
-          name === tf ||
-          fd.detail === false ||
-          fd.kind === "media" ||
-          (n.skip ?? []).includes(name)
-        )
-          continue;
+      const row = (k: string, v: string) =>
+        `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+      for (const name of factFields(rc.s, rc.type, n)) {
+        const fd = def.fields[name]!;
+        const raw = rc.record[name];
         if (fd.kind === "list" && fd.kv) {
           const [kc, vc] = Object.keys(fd.columns!);
-          for (const r of (rc.record[name] as Row[] | undefined) ?? []) {
+          for (const r of (raw as Row[] | undefined) ?? []) {
             const k = scalar(r[kc!]);
             const v = scalar(r[vc!]);
             if (rc.fid === "words" && !k) continue;
@@ -171,11 +184,52 @@ const slot = (n: Slot, rc: RC): string => {
           }
           continue;
         }
-        const v = isEmpty(rc.record[name]) ? "" : display(rc.s, rc.db, rc.type, rc.record, name);
-        if (rc.fid === "words" && v === "") continue; // 客户看的页面不摆空字段
-        rows.push(
-          `<div class="fact"><div class="k">${esc(fd.label)}</div><div class="v">${valueHtml(v)}</div></div>`,
-        );
+        if (fd.kind === "list") {
+          // 普通列表：每行一条，各列用 · 连起来；没有内容 = 客户页不摆（lines 档摆两条波浪线表示“这里有一串”）
+          const items = ((raw as Row[] | undefined) ?? [])
+            .map((r) =>
+              Object.keys(fd.columns!)
+                .map((c) => scalar(r[c]))
+                .filter(Boolean)
+                .join(" · "),
+            )
+            .filter(Boolean);
+          if (rc.fid === "lines") rows.push(row(fd.label, sq(rc, [90, 60], 3, "in")));
+          else if (items.length)
+            rows.push(
+              row(
+                fd.label,
+                `<ul class="items">${items.map((i) => `<li data-copy>${esc(i)}</li>`).join("")}</ul>`,
+              ),
+            );
+          continue;
+        }
+        if (rc.fid === "words" && isEmpty(raw)) continue; // 客户看的页面不摆空字段
+        if (fd.kind === "ref" && fd.to && !isEmpty(raw)) {
+          // 关系：显示对方的显示名，能点过去的就是链接
+          const to = fd.to;
+          const ids = (Array.isArray(raw) ? raw : [raw]).map(scalar);
+          const linkable = hasPage(rc, `/${to}/:id`);
+          const links = ids
+            .map((id) => {
+              const hit = rc.db.find(to, id);
+              if (!hit) return null;
+              const label = esc(scalar(hit[titleFieldOf(rc.s, to)] ?? id));
+              return linkable
+                ? `<a href="#/${esc(to)}/${encodeURIComponent(id)}" data-copy>${label}</a>`
+                : `<span data-copy>${label}</span>`;
+            })
+            .filter((x): x is string => x !== null);
+          rows.push(
+            row(
+              fd.label,
+              rc.fid === "lines" ? sq(rc, [70], 3, "in", "width:110px") : links.join(" / "),
+            ),
+          );
+          continue;
+        }
+        const v = isEmpty(raw) ? "" : display(rc.s, rc.db, rc.type, rc.record, name);
+        rows.push(row(fd.label, valueHtml(v)));
       }
       return `<div class="facts">${rows.join("")}</div>`;
     }
@@ -183,7 +237,8 @@ const slot = (n: Slot, rc: RC): string => {
     case "badges": {
       if (!rc.type || !rc.record) return "";
       const fd = rc.s.model[rc.type]!.fields[n.field]!;
-      const ids = ((rc.record[n.field] as unknown[]) ?? []).map(String);
+      const raw = rc.record[n.field];
+      const ids = (Array.isArray(raw) ? raw : isEmpty(raw) ? [] : [raw]).map(scalar);
       const real = ids.map((id) => {
         const hit = rc.db.find(fd.to!, id);
         return hit ? scalar(hit[titleFieldOf(rc.s, fd.to!)] ?? id) : id;
@@ -225,6 +280,7 @@ const slot = (n: Slot, rc: RC): string => {
       return facetHtml(facets, rc.sel, {
         variant: "side",
         words: rc.fid === "words",
+        clear: strings(rc.s.locale).clearFilters,
         seed: () => seed(rc),
         href,
       });

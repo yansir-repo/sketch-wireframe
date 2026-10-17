@@ -41,6 +41,14 @@ const SCANS: ReadonlyArray<{
     message: (m) => `像是真实价格：${m}`,
   },
   {
+    // 占位/解释性文案：草图的内容是给客户看的，“for testing”“Demo only”这种话是写给自己的
+    re: /\b(?:placeholder|for testing|lorem ipsum|demo only)\b|待填写|占位/gi,
+    level: "warn",
+    rule: "placeholder-copy",
+    message: (m) =>
+      `像是占位或解释性文案：“${m}”——客户会读到它；没有资料依据的内容留空（波浪线），别写说明`,
+  },
+  {
     re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
     level: "warn",
     rule: "contact-email",
