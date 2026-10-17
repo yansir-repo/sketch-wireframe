@@ -27,6 +27,9 @@ const dsl = fileURLToPath(new URL("./src/shared/dsl.ts", import.meta.url));
 const JUDGMENTS = ["check:types", "check:lint", "test", "check:effect"] as const;
 
 export default defineConfig({
+  // The dev server must not answer "/" and unknown paths with index.html itself: the Worker decides (home page, 404s,
+  // the engine page under /s/<code>.<key>), exactly as in production.
+  appType: "custom",
   // Example configs (bundled into the Worker for get_example) import the DSL by its public name.
   resolve: { alias: { "sketch-wireframe": dsl } },
   fmt: { ignorePatterns: ["docs/**", "vendor/**", "migrations/**", "pnpm-lock.yaml"] },
