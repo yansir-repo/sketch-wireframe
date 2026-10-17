@@ -18,6 +18,7 @@ import {
   items,
   linked,
   manyOf,
+  media,
   nav,
   sum,
   free,
@@ -690,5 +691,26 @@ describe("query: order, search, page", () => {
     const s = fresh();
     s["model"]["article"].seed[0].body = [plain(search("q"))];
     expect(errorsOf(s)).toContain("search");
+  });
+});
+
+describe("media", () => {
+  it("is a valid leaf anywhere a leaf is, including inside a stored tree (it is content)", () => {
+    expect(errorsOf(addTo(fresh(), "/", media("video"), media("map", "Find us")))).toBe("");
+    const s = fresh();
+    s["model"]["article"].seed[0].body = [plain(media("chart"))];
+    expect(errorsOf(s)).toBe("");
+  });
+
+  it("rejects a kind that does not exist (schema), and a caption bound to a missing field", () => {
+    expect(parseSketch(addTo(fresh(), "/", { slot: "media", kind: "hologram" })).ok).toBe(false);
+    expect(errorsOf(addTo(fresh(), "/product/:id", media("file", bind("nope"))))).toContain("nope");
+  });
+
+  it("an image whose caption names a video / map / chart is told to be a media", () => {
+    expect(warningsOf(addTo(fresh(), "/", { slot: "image", fill: "VIDEO" }))).toContain("media(");
+    expect(warningsOf(addTo(fresh(), "/", { slot: "image", fill: "LOGO" }))).not.toContain(
+      "media(",
+    );
   });
 });

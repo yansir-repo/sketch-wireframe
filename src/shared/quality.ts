@@ -85,6 +85,7 @@ export const qualityWarnings = (s: Sketch): string[] => {
     if (
       n.slot === "text" ||
       n.slot === "image" ||
+      n.slot === "media" ||
       n.slot === "action" ||
       n.slot === "brand" ||
       n.slot === "embed"
@@ -240,6 +241,24 @@ export const qualityWarnings = (s: Sketch): string[] => {
       "header",
       '页眉第一个东西是回首页的 action：它会渲染成一个按钮。logo/字标用 brand()（或 image("LOGO")）',
     );
+
+  // ---- 图片占位上写着“视频/地图……”：那是 media，不是图片 ----
+  const mediaWord = /(video|视频|\bmap\b|地图|chart|图表|\bicon\b|图标|download|下载)/i;
+  const hint = (n: Node, _scope: Scope, where: string) => {
+    if (!("group" in n) && !("each" in n) && n.slot === "image" && typeof n.fill === "string") {
+      if (mediaWord.test(n.fill))
+        warn(
+          where,
+          `image("${n.fill}") 看着是视频/地图/图表/图标/文件：用 media("video" | "map" | "chart" | "icon" | "file")`,
+        );
+    }
+  };
+  for (const [pattern, page] of Object.entries(pages))
+    page.body.forEach((b, i) =>
+      walkTree(s, b, scopeOfPage(page, s.session), `pages["${pattern}"].body[${i}]`, hint),
+    );
+  walkTree(s, s.header, pageScope(undefined, { state: s.session }), "header", hint);
+  walkTree(s, s.footer, pageScope(undefined, { state: s.session }), "footer", hint);
 
   // ---- 语言 ----
   if (s.locale === undefined) {

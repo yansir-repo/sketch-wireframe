@@ -75,6 +75,60 @@ export const draw = (el: HTMLElement): void => {
         }),
       );
       break;
+    case "media": {
+      // 一个框 + 按 kind 的符号：视频=播放三角，地图=图钉，图表=几根柱，图标=圈加十字，文件=折角的纸加下载箭头
+      const kindName = el.dataset.kind;
+      const line = { ...base, stroke: PENCIL, strokeWidth: 1.8 };
+      const cx = w / 2;
+      const cy = h / 2;
+      const u = Math.max(10, Math.min(w, h) / 4);
+      const add = (n: SVGElement) => void svg.appendChild(n);
+      if (kindName !== "icon" && kindName !== "file") add(rc.rectangle(3, 3, w - 6, h - 6, line));
+      if (kindName === "video")
+        add(
+          rc.polygon(
+            [
+              [cx - u * 0.7, cy - u],
+              [cx - u * 0.7, cy + u],
+              [cx + u, cy],
+            ],
+            line,
+          ),
+        );
+      else if (kindName === "map") {
+        add(rc.circle(cx, cy - u * 0.4, u * 1.1, line));
+        add(rc.line(cx - u * 0.45, cy + u * 0.05, cx, cy + u * 1.1, line));
+        add(rc.line(cx + u * 0.45, cy + u * 0.05, cx, cy + u * 1.1, line));
+      } else if (kindName === "chart") {
+        [0.9, 1.7, 1.2, 2.2].forEach((hh, i) =>
+          add(rc.rectangle(cx - u * 1.9 + i * u, cy + u * 1.1 - hh * u, u * 0.7, hh * u, line)),
+        );
+        add(rc.line(cx - u * 2.2, cy + u * 1.2, cx + u * 2.2, cy + u * 1.2, line));
+      } else if (kindName === "icon") {
+        add(rc.circle(cx, cy, Math.min(w, h) - 8, line));
+        add(rc.line(cx - u * 0.4, cy, cx + u * 0.4, cy, line));
+        add(rc.line(cx, cy - u * 0.4, cx, cy + u * 0.4, line));
+      } else if (kindName === "file") {
+        const fw = Math.min(w - 8, h * 0.8);
+        const x0 = cx - fw / 2;
+        add(
+          rc.polygon(
+            [
+              [x0, 4],
+              [x0 + fw * 0.7, 4],
+              [x0 + fw, 4 + fw * 0.3],
+              [x0 + fw, h - 4],
+              [x0, h - 4],
+            ],
+            line,
+          ),
+        );
+        add(rc.line(cx, cy - u * 0.5, cx, cy + u * 0.6, line));
+        add(rc.line(cx - u * 0.4, cy + u * 0.2, cx, cy + u * 0.7, line));
+        add(rc.line(cx + u * 0.4, cy + u * 0.2, cx, cy + u * 0.7, line));
+      }
+      break;
+    }
     case "frame":
       svg.appendChild(
         rc.rectangle(3, 3, w - 6, h - 6, { ...base, stroke: PENCIL, strokeWidth: 1.8 }),

@@ -131,6 +131,18 @@ const text = Schema.Struct({
   ...common,
 });
 const image = Schema.Struct({ slot: Schema.Literal("image"), fill: Fill, ...common });
+/**
+ * 一个“不是图片”的媒体占位：视频、地图、图表、图标、可下载的文件。只表达“这里有这种东西”（画法由 kind 决定），
+ * 内容（地址、数据、文件）是开发阶段的事——草图里没有这些数据，就不编。fill = 一句说明（不写 = 无）。
+ */
+export const MEDIA_KINDS = ["video", "map", "chart", "icon", "file"] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+const media = Schema.Struct({
+  slot: Schema.Literal("media"),
+  kind: Schema.Literals(MEDIA_KINDS),
+  fill: Fill,
+  ...common,
+});
 const action = Schema.Struct({
   slot: Schema.Literal("action"),
   fill: Fill,
@@ -173,6 +185,7 @@ const embed = Schema.Struct({ slot: Schema.Literal("embed"), fill: Fill, ...comm
 export const SLOT_KINDS = [
   "text",
   "image",
+  "media",
   "action",
   "brand",
   "nav",
@@ -180,7 +193,7 @@ export const SLOT_KINDS = [
   "embed",
   "search",
 ] as const;
-const Atom = Schema.Union([text, image, action, brand, nav, form, embed, search]);
+const Atom = Schema.Union([text, image, media, action, brand, nav, form, embed, search]);
 export type Atom = typeof Atom.Type;
 
 // ---- 节点（递归）----

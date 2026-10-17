@@ -23,6 +23,7 @@ import {
   free,
   gallery,
   manyOf,
+  media,
   min,
   oneOf,
   pair,
@@ -192,6 +193,12 @@ export default defineSketch({
         ),
         section("产品分类入口", collection("category", { limit: 8 })),
         section("热门型号", collection("product", { limit: 4 })),
+        // media：不是图片的占位（视频、地图、图表、图标、文件下载）——内容是开发阶段的事，草图里不编
+        section("品牌视频", media("video")),
+        section(
+          "产能",
+          row(media("chart"), col(row(media("icon"), text(3)), row(media("icon"), text(3)))),
+        ),
         // distinct：一个字段出现过的各个值，每项自带“有这个值的记录数”——分组统计
         section(
           "各分类型号数",
@@ -305,6 +312,7 @@ export default defineSketch({
           ]),
         ),
         // with：把当前型号带去报价表单——表单里“意向型号”已经选好
+        section("规格书", row(media("file"), text(3, "产品规格书（PDF）"))),
         section(
           "认证与报价",
           row(
@@ -334,6 +342,7 @@ export default defineSketch({
             ["pack", "怎么包装？", text(3)],
           ]),
         ),
+        section("到访我们", media("map")),
         section("表单", form()),
       ],
     },

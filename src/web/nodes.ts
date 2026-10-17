@@ -598,6 +598,20 @@ const imageAtom = (n: Extract<Atom, { slot: "image" }>, rc: RC): string => {
   return `<div class="xbox" data-rough="x" data-seed="${seed(rc)}">${cap}</div>`;
 };
 
+/** 媒体占位：一个框，框里按 kind 画一个符号（draw.ts）；说明文字只在 words 档显示。 */
+const mediaAtom = (n: Extract<Atom, { slot: "media" }>, rc: RC): string => {
+  const r = fillText(rc, n.fill);
+  const val = r.kind === "val" ? r.val : NONE;
+  const said =
+    val.kind === "text"
+      ? val.v
+      : val.kind === "field"
+        ? display(rc.s, rc.db, val.type, val.row, val.field)
+        : "";
+  const cap = rc.fid === "words" && said ? `<span class="cap" data-copy>${esc(said)}</span>` : "";
+  return `<div class="xbox media" data-kind="${n.kind}" data-rough="media" data-seed="${seed(rc)}">${cap}</div>`;
+};
+
 const actionAtom = (n: Extract<Atom, { slot: "action" }>, rc: RC): string => {
   const r = fillText(rc, n.fill);
   const val = r.kind === "val" ? r.val : NONE;
@@ -622,6 +636,8 @@ const atom = (n: Atom, rc: RC): string => {
       return textAtom(n, rc);
     case "image":
       return imageAtom(n, rc);
+    case "media":
+      return mediaAtom(n, rc);
     case "action":
       return actionAtom(n, rc);
     case "brand": {

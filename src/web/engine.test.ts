@@ -24,6 +24,7 @@ import {
   image,
   items,
   max,
+  media,
   min,
   nav,
   pager,
@@ -258,6 +259,13 @@ describe("every node renders exactly one root element", () => {
     ["text (bound)", text(3, bind("code")), detailRc],
     ["text (count)", text(2, count(records("product"))), (f) => rcOf(example, { fid: f })],
     ["image", image(), (f) => rcOf(example, { fid: f })],
+    ["media (video)", media("video", "x"), (f) => rcOf(example, { fid: f })],
+    ["media (file)", media("file"), (f) => rcOf(example, { fid: f })],
+    [
+      "search",
+      search("q"),
+      (f) => rcOf(example, { fid: f, state: { q: { values: [], free: true } } }),
+    ],
     ["action", action("Go", "/"), (f) => rcOf(example, { fid: f })],
     ["action (with)", action("Go", "/inquiry", { with: { product: bind("code") } }), detailRc],
     ["nav", nav("/", "/product"), (f) => rcOf(example, { fid: f })],
@@ -841,5 +849,29 @@ describe("query: order, search, page (state in the address, like filters)", () =
     const lines = rcOf(example, { state, sel: {}, fid: "lines" });
     expect(node(search("q", "Find a model"), lines)).not.toContain("data-copy");
     expect(node(search("q"), rc())).toContain("sq");
+  });
+});
+
+describe("media (video / map / chart / icon / file placeholders)", () => {
+  const rc = (fid: "words" | "lines" = "words") => rcOf(example, { fid });
+
+  it("each kind is a drawn box that says what it is (data-kind), without any copy of its own", () => {
+    for (const kind of ["video", "map", "chart", "icon", "file"] as const) {
+      const html = node(media(kind), rc());
+      expect(html).toContain(`data-kind="${kind}"`);
+      expect(html).toContain('data-rough="media"');
+      expect(html).not.toContain("data-copy"); // 没写说明就没有文字：不编
+    }
+  });
+
+  it("a caption shows in words fidelity only", () => {
+    expect(node(media("video", "Intro"), rc("words"))).toContain("data-copy");
+    expect(node(media("video", "Intro"), rc("lines"))).not.toContain("data-copy");
+  });
+
+  it("can be bound to a value of the record (a caption from data)", () => {
+    expect(node(media("file", bind("code")), detail(example, "P101", { fid: "words" }))).toContain(
+      "P101",
+    );
   });
 });

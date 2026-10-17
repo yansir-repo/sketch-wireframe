@@ -323,6 +323,16 @@ export default async function flow({ page, go, sleep, check, load }) {
       )),
   );
 
+  // ---- media：不是图片的占位，每种都画了符号 ----
+  await go("#/");
+  const mediaDrawn = await ev(() => {
+    const el = document.querySelector('.xbox.media[data-kind="video"]');
+    return !!el && el.querySelectorAll(".rough-overlay path").length >= 2;
+  });
+  check("media：首页的视频占位画出了框和播放符号", mediaDrawn);
+  await go("#/product/P101");
+  check("media：详情页的文件占位", (await count('.xbox.media[data-kind="file"]')) === 1);
+
   // ---- 客户页的排序、搜索、分页：都是地址里的参数 ----
   await go("#/product");
   check(

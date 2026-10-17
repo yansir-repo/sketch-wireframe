@@ -318,6 +318,7 @@ export const validate = (s: Sketch): Report => {
         checkFill(n.fill, env, ctx, at);
         break;
       case "image":
+      case "media":
         checkFill(n.fill, env, ctx, at);
         break;
       case "brand":

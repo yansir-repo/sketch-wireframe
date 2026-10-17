@@ -7,7 +7,7 @@
 
 ```
 Node   = 叶子 | 排列 | 生成
-叶子   = text | image | action | brand | nav | form | embed | search
+叶子   = text | image | media | action | brand | nav | form | embed | search
 排列   = Group(dir, Node[])                  dir ∈ col | row | grid；任何节点可带 when（条件出现）；组可以是 link（可点）
 生成   = Each(dir, x ∈ 来源) → Node          来源 = records | pages | fields | items | distinct | facets | options | param
 fill   = ∅（粗波浪线）| "文案" | bind(路径) | fold(op, 来源, 字段)        op ∈ count | sum | min | max | avg
@@ -28,6 +28,7 @@ Page   = 路由 × 环境 → Node                  环境 = 命名绑定（页�
 |---|---|---|
 | `text(1\|2\|3, fill?)` | 一段文字（1 标题 / 2 副标题 / 3 正文）；`{circle:true}` = 圆圈里的一个词（徽章） | 没填 = 粗波浪线；绑的字段在这条记录上没有值 = 一条粗短线 |
 | `image(fill?)` | 图片占位（叉框）；绑到图片字段显示第一张真图；绑到 `items` 的一张图 = 点开放大 | |
+| `media(kind, fill?)` | **不是图片**的占位：`kind` ∈ `video` `map` `chart` `icon` `file`（视频、地图、图表、图标、可下载的文件）。引擎按 kind 画一个符号；`fill` = 一句说明（不写 = 无，不编）。内容（地址、数据、文件）是开发阶段的事。**别用 `image("VIDEO")` 凑**，体检会提醒 | |
 | `action(fill?, to?, {ghost?, with?, set?})` | 按钮；`to` 是路由；`with` 把环境带去目标页；`set` 改当前页的状态参数（单选是“设成”、多选是“切换”、值写空串是清掉；选中的那个实心） | |
 | `brand(fill?, to?)` | logo / 字标，点它回首页。**别用 `action` 做 logo**，那会是按钮 | 没填 = 粗波浪线字标 |
 | `nav(...paths)` | 导航，名字取自各路由的页面名。放不下时引擎自动收进手绘的菜单按钮 | |

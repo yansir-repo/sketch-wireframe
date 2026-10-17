@@ -961,3 +961,32 @@ dialog .actions {
 .search input:not(:placeholder-shown) ~ .sq {
   display: none;
 }
+
+/* 媒体占位：图标和文件是小件，视频是 16:9，地图和图表要有高度 */
+.xbox.media[data-kind="icon"] {
+  min-height: 0;
+  width: 56px;
+  height: 56px;
+}
+.xbox.media[data-kind="file"] {
+  min-height: 0;
+  width: 72px;
+  height: 88px;
+}
+.xbox.media[data-kind="video"] {
+  aspect-ratio: 16 / 9;
+}
+.xbox.media[data-kind="chart"],
+.xbox.media[data-kind="map"] {
+  min-height: 160px;
+}
+.xbox.media[data-kind="video"],
+.xbox.media[data-kind="map"],
+.xbox.media[data-kind="chart"] {
+  width: 100%;
+  max-width: 560px;
+}
+.xbox.media[data-kind="icon"],
+.xbox.media[data-kind="file"] {
+  flex: none;
+}

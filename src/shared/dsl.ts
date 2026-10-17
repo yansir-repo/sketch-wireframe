@@ -19,6 +19,7 @@ import type {
   Group,
   Node,
   ParamDecl,
+  MediaKind,
   Option,
   RecordsSource,
   Row,
@@ -97,6 +98,12 @@ export const action = (
   ...(opts.ghost ? { ghost: true } : {}),
   ...(opts.with ? { with: opts.with } : {}),
   ...(opts.set ? { set: opts.set } : {}),
+});
+/** 视频、地图、图表、图标、文件下载的占位（不是图片）：`media("video")`。fill = 一句说明，不写 = 无。 */
+export const media = (kind: MediaKind, fill?: Fill): Atom => ({
+  slot: "media",
+  kind,
+  ...(fill === undefined ? {} : { fill }),
 });
 /** 品牌：logo 或字标，点它回首页。没填 = 粗波浪线字标。 */
 export const brand = (fill?: Fill, to = "/"): Atom => ({
