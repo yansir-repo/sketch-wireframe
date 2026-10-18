@@ -13,7 +13,8 @@
 ## Example
 
 - Live example, a fictional stationery catalog: {{example}}
-- Inside any sketch, `#/_model` is the data-structure diagram and the CRUD back office (the sketch itself never links to it).
+- Inside any sketch, `#/_model` is the data-structure diagram and the CRUD back office (the sketch itself never links to it); `#/_model/_notes` lists the developer notes (`noted(...)` / page `note`).
+- Prefer the patterns (`detailPage`, `listPage`, `related`, `cta`, `hero`) over hand-written structure, and `f.ref` for relations — the check refuses relations stored as text/list, fields no client page shows, and placeholder copy.
 
 ## Links
 

@@ -19,6 +19,8 @@ import {
   facts,
   form,
   gallery,
+  cta,
+  detailPage,
   hero,
   manyOf,
   media,
@@ -181,6 +183,7 @@ export default defineSketch({
         ),
         section("产品分类入口", collection("category", { limit: 8 })),
         section("热门型号", collection("product", { limit: 4 })),
+        section("联系我们", cta({ actions: [action("获取报价", "/inquiry")] })),
         // media：不是图片的占位（视频、地图、图表、图标、文件下载）——内容是开发阶段的事，草图里不编
         section("品牌视频", media("video")),
         section(
@@ -260,33 +263,35 @@ export default defineSketch({
       ],
     },
 
+    // 详情页模式：概览（图库 + 标题）+ 按板块分组的字段（用 only 分，一个字段只出现一次）；
+    // 标签页的状态就是地址里的 ?tab=…：每个标签都能被分享、被验证器逐个点到
     "/product/:id": {
-      ctx: { type: "product" },
-      // 标签页的状态就是地址里的 ?tab=…：每个标签都能被分享、被验证器逐个点到
-      state: { tab: oneOf(["specs", "related"]) },
-      body: [
-        section("图库", gallery("photos")),
-        section("基本信息", text(1, bind("code")), facts({ only: ["category", "materials"] })),
-        section(
-          "详情",
-          tabs("tab", [
-            ["specs", "技术参数", facts({ only: ["specs"] })],
-            ["related", "相关型号", facts({ only: ["related"] })],
-          ]),
-        ),
-        // with：把当前型号带去报价表单——表单里“意向型号”已经选好
-        section("规格书", row(media("file"), text(3, "产品规格书（PDF）"))),
-        section(
-          "认证与报价",
-          row(
-            badges("certs"),
-            action("为这款获取报价", "/inquiry", { with: { product: bind("code") } }),
+      ...detailPage("product", {
+        overview: { title: "基本信息", heading: "code", gallery: "photos" },
+        sections: [{ title: "分类与材质", only: ["category", "materials"] }],
+        after: [
+          section(
+            "详情",
+            tabs("tab", [
+              ["specs", "技术参数", facts({ only: ["specs"] })],
+              ["related", "相关型号", facts({ only: ["related"] })],
+            ]),
           ),
-        ),
-        // 只有会员看得到的一块：条件出现，条件是会话参数
-        when("viewer=member", section("会员资料", text(3), text(3))),
-        section("同类型号", related("product", "category")),
-      ],
+          // with：把当前型号带去报价表单——表单里“意向型号”已经选好
+          section("规格书", row(media("file"), text(3, "产品规格书（PDF）"))),
+          section(
+            "认证与报价",
+            row(
+              badges("certs"),
+              action("为这款获取报价", "/inquiry", { with: { product: bind("code") } }),
+            ),
+          ),
+          // 只有会员看得到的一块：条件出现，条件是会话参数
+          when("viewer=member", section("会员资料", text(3), text(3))),
+          section("同类型号", related("product", "category")),
+        ],
+      }),
+      state: { tab: oneOf(["specs", "related"]) },
     },
 
     "/inquiry": {

@@ -221,6 +221,8 @@ type Arrange = {
   readonly rule?: boolean;
   /** 条件出现。 */
   readonly when?: When;
+  /** 给后续开发者的批注（“这块第二期做”“按角色分流”）：不渲染给客户，运营视图（#/_model/_notes）里列出。不是文案，不进“线条档零文案”的检查。 */
+  readonly note?: string;
   /** 这个组本身是一个链接：去 to（带上 with），或者改当前页的状态参数（set）。选中的状态由地址里的参数推出，不用另写。 */
   readonly link?: {
     readonly to?: string;
@@ -246,6 +248,7 @@ const arrange = {
   seq: Schema.optionalKey(Schema.Boolean),
   rule: Schema.optionalKey(Schema.Boolean),
   when: Schema.optionalKey(When),
+  note: Schema.optionalKey(Schema.String),
   link: Schema.optionalKey(
     Schema.Struct({
       to: Schema.optionalKey(Schema.String),
@@ -364,6 +367,8 @@ export type ParamDecl = typeof ParamDecl.Type;
 
 export const Page = Schema.Struct({
   name: Schema.optionalKey(Schema.String),
+  /** 给后续开发者的批注，同组的 note：不渲染给客户。 */
+  note: Schema.optionalKey(Schema.String),
   ctx: Schema.optionalKey(Ctx),
   /** 这个页面的状态参数（地址里 ?名=值）。筛选的参数不用声明：它们就是列表页类型的字段。 */
   state: Schema.optionalKey(Schema.Record(Schema.String, ParamDecl)),

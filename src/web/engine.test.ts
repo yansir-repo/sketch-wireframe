@@ -27,10 +27,12 @@ import {
   media,
   min,
   nav,
+  noted,
   pager,
   records,
   row,
   search,
+  section,
   sortMenu,
   steps,
   sum,
@@ -873,5 +875,15 @@ describe("media (video / map / chart / icon / file placeholders)", () => {
     expect(node(media("file", bind("code")), detail(example, "P101", { fid: "words" }))).toContain(
       "P101",
     );
+  });
+});
+
+describe("note: for the next developer, never for the client", () => {
+  it("a noted group renders exactly as the same group without the note (one root, no note text)", () => {
+    const rc = rcOf(example);
+    const plain = section("A", text(3, "x"));
+    const withNote = noted("secret note for developers", plain);
+    expect(node(withNote, rc)).toBe(node(plain, rc));
+    expect(node(withNote, rc)).not.toContain("secret note");
   });
 });

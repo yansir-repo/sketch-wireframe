@@ -20,6 +20,7 @@ import {
   manyOf,
   media,
   nav,
+  noted,
   sum,
   free,
   oneOf,
@@ -34,6 +35,7 @@ import {
 } from "./dsl.ts";
 import { parseSketch, sketchJsonSchema } from "./parse.ts";
 import { pagesOf } from "./derive.ts";
+import { notesOf } from "./notes.ts";
 import { FORMAT_VERSION } from "./schema.ts";
 import { parsePath } from "./scope.ts";
 
@@ -244,47 +246,54 @@ describe("fields source (facts)", () => {
   });
 });
 
-describe("design-quality warnings (do not block publishing)", () => {
+describe("design-quality rules (errors block publishing, warnings do not)", () => {
   it("warns when a nav has more than 7 entries", () => {
     const s = fresh();
     s["header"].group[1].paths = Array.from({ length: 8 }, () => "/");
     expect(warningsOf(s)).toContain("导航有 8 项");
   });
 
-  it("warns about fields no client page ever shows, and lets internal ones be", () => {
+  it("rejects fields no client page ever shows, and lets internal ones be", () => {
     const s = fresh();
     s["model"]["product"].fields["note"] = { kind: "text", label: "备注" };
-    expect(warningsOf(s)).toContain("note");
+    expect(errorsOf(s)).toContain("note");
     s["model"]["product"].fields["note"].internal = true;
-    expect(warningsOf(s)).not.toContain("note");
+    expect(errorsOf(s)).not.toContain("note");
   });
 
   it("counts a field as shown when it is bound, in a fields source, an items source or a computed path", () => {
     const s = fresh();
     s["model"]["product"].fields["note"] = { kind: "text", label: "备注" };
     addTo(s, "/product/:id", text(3, bind("note")));
-    expect(warningsOf(s)).not.toContain("note");
+    expect(errorsOf(s)).not.toContain("note");
   });
 
-  it("warns when two facts on one page show the same fields", () => {
+  it("rejects two facts on one page that show the same fields", () => {
     const s = addTo(fresh(), "/product/:id", facts({ only: ["category", "materials"] }));
-    expect(warningsOf(s)).toContain("显示完全相同的字段");
+    expect(errorsOf(s)).toContain("显示完全相同的字段");
   });
 
-  it("warns when a collection on a detail page has no where (shows everything, not related)", () => {
-    expect(
-      warningsOf(addTo(fresh(), "/product/:id", collection("product", { limit: 3 }))),
-    ).toContain("没有 where");
+  it("rejects a collection on a detail page with no where (shows everything, not related)", () => {
+    expect(errorsOf(addTo(fresh(), "/product/:id", collection("product", { limit: 3 })))).toContain(
+      "没有 where",
+    );
   });
 
-  it("warns on placeholder / explanatory copy and on a back-office-looking field shown to clients", () => {
-    const s = fresh();
-    s["model"]["product"].seed[0].specs[0].value = "A placeholder used only for testing";
-    expect(warningsOf(s)).toContain("placeholder-copy");
+  it("rejects placeholder / explanatory copy and a back-office-looking field shown to clients", () => {
+    for (const copy of [
+      "A placeholder used only for testing",
+      "Synthetic row for the blog route",
+      "Demo only; no delivery promise",
+      "Demo Hoodie Base",
+    ]) {
+      const s = fresh();
+      s["model"]["product"].seed[0].specs[0].value = copy;
+      expect(errorsOf(s)).toContain("placeholder-copy");
+    }
     const t = fresh();
     t["model"]["product"].fields["verification_status"] = { kind: "text", label: "核实" };
     addTo(t, "/product/:id", facts({ only: ["verification_status"] }));
-    expect(warningsOf(t)).toContain("verification_status");
+    expect(errorsOf(t)).toContain("verification_status");
   });
 
   it("warns on thin data, a bloated model, an overloaded page and a logo built as an action", () => {
@@ -327,9 +336,9 @@ describe("design-quality warnings (do not block publishing)", () => {
     expect(warningsOf(s)).not.toContain("locale");
   });
 
-  it("warns when a $field where matches nothing on any seed record, and stays quiet when records are related", () => {
+  it("rejects a $field where that matches nothing on any seed record, and stays quiet when records are related", () => {
     const rel = collection("product", { where: { category: "$category" }, notSelf: true });
-    expect(warningsOf(addTo(fresh(), "/product/:id", rel))).not.toContain("永远是空的");
+    expect(errorsOf(addTo(fresh(), "/product/:id", rel))).not.toContain("永远是空的");
     const lonely = fresh();
     (lonely["model"]["product"].seed as Rec[]).forEach((r, i) => {
       r["category"] = ["pens", "notebooks", "folders", "desk"][i % 4];
@@ -338,7 +347,7 @@ describe("design-quality warnings (do not block publishing)", () => {
       (r, i, all) => all.findIndex((x) => x["category"] === r["category"]) === i,
     );
     for (const r of lonely["model"]["product"].seed as Rec[]) r["related"] = [];
-    expect(warningsOf(addTo(lonely, "/product/:id", rel))).toContain("永远是空的");
+    expect(errorsOf(addTo(lonely, "/product/:id", rel))).toContain("永远是空的");
   });
 });
 
@@ -536,8 +545,8 @@ describe("fold and distinct", () => {
   it("a number field that only a fold shows is counted as shown (no 'never shown' warning)", () => {
     const s = fresh();
     s["model"]["product"].fields["price_hint"] = { kind: "number", label: "x" };
-    expect(warningsOf(s)).toContain("price_hint");
-    expect(warningsOf(addTo(s, "/", text(3, avg(records("product"), "price_hint"))))).not.toContain(
+    expect(errorsOf(s)).toContain("price_hint");
+    expect(errorsOf(addTo(s, "/", text(3, avg(records("product"), "price_hint"))))).not.toContain(
       "price_hint",
     );
   });
@@ -566,7 +575,12 @@ describe("embed and blocks", () => {
     const s = fresh();
     s["pages"]["/article/:id"] = {
       ctx: { type: "article" },
-      body: [plain(section("x", ...(nodes as Parameters<typeof section>[1][])))],
+      // published 也得有人显示（否则“从未展示”是 error）；这里只关心 body 和 title 的去向
+      body: [
+        plain(
+          section("x", text(3, bind("published")), ...(nodes as Parameters<typeof section>[1][])),
+        ),
+      ],
     };
     return s;
   };
@@ -577,8 +591,8 @@ describe("embed and blocks", () => {
   });
 
   it("a blocks field is not a facts row (it has its own renderer), and counts as shown when embedded", () => {
-    expect(warningsOf(articlePage(text(1, bind("title"))))).toContain("body"); // 没人 embed 它：提醒
-    expect(warningsOf(fresh())).not.toContain("body");
+    expect(errorsOf(articlePage(text(1, bind("title"))))).toContain("body"); // 没人 embed 它：拦
+    expect(errorsOf(fresh())).not.toContain("body");
   });
 });
 
@@ -718,5 +732,151 @@ describe("media", () => {
     expect(warningsOf(addTo(fresh(), "/", { slot: "image", fill: "LOGO" }))).not.toContain(
       "media(",
     );
+  });
+});
+
+describe("model data consistency (errors)", () => {
+  it("rejects an unlisted value the field can never hold, and an unlisted on a field it cannot compare", () => {
+    const s = fresh();
+    s["model"]["product"].unlisted = { status: "不存在的值" };
+    expect(errorsOf(s)).toContain("不在 status 的选项里");
+    const t = fresh();
+    t["model"]["product"].unlisted = { moq: "0" };
+    expect(errorsOf(t)).toContain("unlisted 只能比较");
+    expect(errorsOf(fresh())).toBe("");
+  });
+
+  it("rejects a seed choice value outside the options, and a seed field the model does not declare", () => {
+    const s = fresh();
+    s["model"]["product"].seed[0].status = "Demo only";
+    expect(errorsOf(s)).toContain('status 的值 "Demo only" 不在选项里');
+    const t = fresh();
+    t["model"]["product"].seed[0].colour = "red";
+    expect(errorsOf(t)).toContain("字段 colour 没在 fields 里声明");
+  });
+
+  it("rejects a relation stored as text / list (where and links cannot use it), and a *_slug column", () => {
+    const s = fresh();
+    s["model"]["article"].fields["related_products"] = {
+      kind: "list",
+      label: "x",
+      columns: { a: "A" },
+    };
+    s["model"]["article"].fields["related_products"].internal = true;
+    expect(errorsOf(s)).toContain('f.ref("product")');
+    const t = fresh();
+    t["model"]["inquiry"].fields["source_product"] = { kind: "text", label: "x", internal: true };
+    expect(errorsOf(t)).toContain('f.ref("product")');
+    const u = fresh();
+    u["model"]["article"].fields["links"] = {
+      kind: "list",
+      label: "x",
+      internal: true,
+      columns: { product_slug: "型号", role: "角色" },
+    };
+    expect(errorsOf(u)).toContain("列像是指向 product 的关系");
+  });
+
+  it("leaves alone fields whose name only looks related", () => {
+    const s = fresh();
+    s["model"]["article"].fields["source_note"] = { kind: "text", label: "x", internal: true };
+    s["model"]["article"].fields["related_links"] = {
+      kind: "list",
+      label: "x",
+      internal: true,
+      columns: { url: "地址", name: "名称" },
+    };
+    expect(errorsOf(s)).toBe("");
+  });
+
+  it("a type's own identifier (product_id, product_code) is not a relation to itself", () => {
+    const s = fresh();
+    s["model"]["product"].fields["product_id"] = { kind: "text", label: "x", internal: true };
+    s["model"]["product"].fields["product_code"] = { kind: "text", label: "x", internal: true };
+    expect(errorsOf(s)).toBe("");
+    // ……但指向别的类型的 *_id 仍是关系
+    const t = fresh();
+    t["model"]["article"].fields["product_id"] = { kind: "text", label: "x", internal: true };
+    expect(errorsOf(t)).toContain('f.ref("product")');
+  });
+
+  it("derives an entry page for a multi-valued term vocabulary too", () => {
+    const pages = pagesOf(checkSketch(fresh()).sketch!);
+    expect(pages["/cert/:id"]?.ctx).toMatchObject({
+      type: "product",
+      many: true,
+      where: { certs: ":id" },
+    });
+    expect(pages["/material/:id"]?.ctx).toMatchObject({ where: { materials: ":id" } });
+    expect(pages["/category/:id"]?.ctx).toMatchObject({ where: { category: ":id" } }); // 单值优先
+  });
+});
+
+describe("notes", () => {
+  const withNote = (note: string): Json => {
+    const s = fresh();
+    s["pages"]["/"].body.push(plain(noted(note, section("加的", text(3, "x")))));
+    return s;
+  };
+
+  it("a note may explain (not copy-checked), but price / secret red lines still apply to it", () => {
+    expect(errorsOf(withNote("Demo data; second phase: wire the real catalog"))).toBe("");
+    expect(errorsOf(withNote("the budget is ¥50000"))).toContain("price");
+    expect(errorsOf(addTo(fresh(), "/", text(3, "Demo only; no promise")))).toContain(
+      "placeholder-copy",
+    );
+  });
+
+  it("a note on a field called note is just data, and does not hide placeholder copy", () => {
+    const s = fresh();
+    s["model"]["product"].fields["note"] = { kind: "text", label: "x", internal: true };
+    s["model"]["product"].seed[0].note = "Demo only";
+    expect(errorsOf(s)).toContain("placeholder-copy");
+  });
+
+  it("a titled section holding one unfilled line is the idiom for 'prose goes here' — never flagged", () => {
+    expect(warningsOf(addTo(fresh(), "/", text(3)))).not.toContain("没填");
+  });
+
+  it("lists every note with where it is", () => {
+    const s = withNote("later");
+    s["pages"]["/"].note = "home note";
+    const notes = notesOf(checkSketch(s).sketch!);
+    expect(notes.map((n) => n.note)).toEqual(["home note", "later"]);
+  });
+});
+
+describe("a detail page's link to a form page carries the record", () => {
+  it("warns when the form has a ref to this type and the link gives it no value; quiet with it", () => {
+    const missing = addTo(fresh(), "/product/:id", action("Ask", "/inquiry"));
+    expect(warningsOf(missing)).toContain("没带上当前记录");
+    const given = addTo(
+      fresh(),
+      "/product/:id",
+      action("Ask", "/inquiry", { with: { product: bind("code") } }),
+    );
+    expect(warningsOf(given)).not.toContain("没带上当前记录");
+  });
+});
+
+describe("association types", () => {
+  it("are exempt from the 'too few records' warning (a row is a relationship fact; none is made up), content types are not", () => {
+    const s = fresh();
+    s["model"]["bundle-item"] = {
+      label: "套件项",
+      key: "id",
+      fields: {
+        id: { kind: "text", label: "编号" },
+        bundle: { kind: "ref", label: "套件", to: "product" },
+        part: { kind: "ref", label: "配件", to: "product" },
+        role: { kind: "text", label: "角色" },
+      },
+      seed: [],
+    };
+    expect(warningsOf(s)).not.toContain("model.bundle-item.seed");
+    const content = fresh();
+    content["model"]["product"].seed = (content["model"]["product"].seed as Rec[]).slice(0, 1);
+    for (const r of content["model"]["product"].seed as Rec[]) r["related"] = [];
+    expect(warningsOf(content)).toContain("model.product.seed");
   });
 });

@@ -12,9 +12,11 @@
 ## 规则的唯一来源
 
 - **Sketch 的定义**：`src/shared/schema.ts`（Effect Schema）。它同时是 TS 类型、发布时 JSON 的结构校验、`describe_format` 的 JSON Schema。**不要**另写一份手写类型。客户端只 `import type` 它，effect 不进浏览器包。
-- **语义校验**（引用对得上、路由存在、seed 键合法……）：`src/shared/validate.ts`；**红线**（价格/密码/令牌）：`redlines.ts`；**一份草图能不能发布**只有一个判断：`check.ts` 的 `checkSketch`（结构 → 语义 → 红线）。CLI、MCP 的 `check_sketch`、服务端发布都调它，三处结论不会不同。
+- **语义校验**（引用对得上、路由存在、seed 键合法……）：`src/shared/validate.ts`；**质量**（字段有没有被展示、关系是不是 ref、种子和文案能不能给客户看）：`quality.ts`；**红线**（价格/密码/令牌/占位说明）：`redlines.ts`；**一份草图能不能发布**只有一个判断：`check.ts` 的 `checkSketch`（结构 → 语义 → 质量 → 红线）。CLI、MCP 的 `check_sketch`、服务端发布都调它，三处结论不会不同。
+- **闸门与引擎分离**：`validate()` 只回答“引擎渲染得了吗”，浏览器里（`web/mount.ts`）也跑它，有 error 就整页白屏；质量和红线**只在 `checkSketch` 里**。新规则放前者，线上存量草图会白屏，所以新规则一律放后者。**能由数据确定判定的是 error（拦发布），本质靠判断的（阈值、启发）才是 warning**——warning 不拦，agent 会带着它们上线，所以别把能判定的放在 warning 里。
+- **批注**：`note`（组/each/页面）是写给后续开发者的话，不渲染给客户、不算文案；但它仍在草图 JSON 里，红线照扫。`notes.ts` 是批注的唯一读取点。
 - **页面是模型的影子**：`derive.ts` 的 `pagesOf`；DSL 词汇：`dsl.ts`。写 DSL 的人不用管格式版本（`defineSketch` 补 `v`）。
-- **文档**：`docs/format.md` 是给 agent 的语法说明，**被 `describe_format` 原样返回**——改语法就改它。工具清单：`src/worker/mcp.ts` 的 `TOOLS` 是唯一来源，`scripts/do.ts` 只是壳；加能力 = `TOOLS` 加一项 + `callTool` 加一支，并更新 `docs/agent-api.md` 与 `public/llms.txt`。
+- **文档**：`docs/format.md` 是给 agent 的语法说明，**被 `describe_format` 原样返回**——改语法就改它。工具清单：`src/worker/mcp.ts` 的 `TOOLS` 是唯一来源，`scripts/do.ts` 只是壳；加能力 = `TOOLS` 加一项 + `callTool` 加一支，并更新 `docs/agent-api.md` 与 `docs/llms.txt`。
 - **没填的东西一律是粗波浪线**（引擎的统一规矩）：不要为了“好看”给槽编文案、给参数编值。
 
 ## 兼容性：所有已发布的草图共用这一份引擎

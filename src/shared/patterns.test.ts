@@ -3,7 +3,9 @@ import example from "../../examples/catalog.config.ts";
 import { checkSketch } from "./check.ts";
 import {
   action,
+  badges,
   cta,
+  detailPage,
   section,
   featureCols,
   formPage,
@@ -106,6 +108,13 @@ describe("listPage wires filter, search, sort and paging in one place", () => {
     expect(Object.keys(p.state)).toEqual(["page"]);
   });
 
+  it("a single sort value has nothing to choose: no menu, no sort parameter, a fixed order", () => {
+    const p = plain(listPage("product", { title: "P", sort: [["-moq", "B"]] }));
+    expect(JSON.stringify(p.body)).not.toContain('"sortMenu"');
+    expect(JSON.stringify(p.body)).toContain('"order":"-moq"');
+    expect(Object.keys(p.state)).toEqual(["page"]);
+  });
+
   it("before / after add sections around the list", () => {
     const p = listPage("article", {
       title: "A",
@@ -134,5 +143,42 @@ describe("formPage and siteHeader", () => {
     s["header"] = plain(h);
     expect(problems(s as Sketch)).toEqual([]);
     expect((plain(h).group as unknown[]).length).toBe(3);
+  });
+});
+
+describe("detailPage", () => {
+  const page = detailPage("product", {
+    overview: { title: "Overview", heading: "code", gallery: "photos" },
+    sections: [
+      { title: "Classification", only: ["category", "materials"] },
+      { title: "Specs", only: ["related", "moq", "specs"] },
+    ],
+    related: [{ title: "Same category", type: "product", by: "category", limit: 3 }],
+    after: [section("Certificates", badges("certs"))],
+  });
+
+  it("is the detail page of a type: overview, one facts section per group, related, extras", () => {
+    expect(page.ctx).toEqual({ type: "product" });
+    expect(page.body.length).toBe(5);
+    expect(JSON.stringify(plain(page).body[1])).toContain('"only":["category","materials"]');
+  });
+
+  it("with every field shown exactly once it is a valid page with no problems", () => {
+    expect(problems(withPage("/lab/:id", page))).toEqual([]);
+  });
+
+  it("a field nobody shows, or one shown twice, is stopped by the checkup — that is what replaces skip", () => {
+    const missing = detailPage("product", {
+      sections: [{ title: "Only one", only: ["category"] }],
+    });
+    // 覆盖同名路由（/product/:id）：默认详情页让位，字段才真的“没人显示”
+    expect(problems(withPage("/product/:id", missing)).join("\n")).toContain("没出现过");
+    const twice = detailPage("product", {
+      sections: [
+        { title: "A", only: ["category", "materials"] },
+        { title: "B", only: ["category", "materials"] },
+      ],
+    });
+    expect(problems(withPage("/product/:id", twice)).join("\n")).toContain("显示完全相同");
   });
 });

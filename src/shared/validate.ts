@@ -6,7 +6,6 @@
 import { matchRoute, pagesOf } from "./derive.ts";
 import { parseOrder, searchFields, sortable } from "./facts.ts";
 import { parseNodes } from "./parse.ts";
-import { qualityWarnings } from "./quality.ts";
 import {
   FIELD_KINDS,
   SLOT_KINDS,
@@ -423,10 +422,7 @@ export const validate = (s: Sketch): Report => {
         seen.add(scalar(k));
         for (const [name, v] of Object.entries(r)) {
           const fd = def.fields[name];
-          if (!fd) {
-            warn(rat, `字段 ${name} 没在 fields 里声明`);
-            continue;
-          }
+          if (!fd) continue; // 没声明的字段由发布闸门（quality）报错；引擎只是忽略它
           if (
             fd.kind === "blocks" &&
             !(v === undefined || v === "" || (Array.isArray(v) && v.length === 0))
@@ -526,6 +522,5 @@ export const validate = (s: Sketch): Report => {
     check(s.footer, pageScope(undefined, { state: s.session }), { params: [] }, "footer", 1);
   else err("footer", "缺少 footer");
 
-  if (errors.length === 0) warnings.push(...qualityWarnings(s)); // 结构都不对时，“设计问题”没有意义
   return { errors, warnings };
 };

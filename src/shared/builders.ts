@@ -42,6 +42,8 @@ export const section = (name: string, ...children: Node[]): Group => ({
   dir: "col",
   name,
 });
+/** 给一个组（或 each）加批注：写给后续开发者的话，不渲染给客户，也不算文案。 */
+export const noted = <T extends Group | Each>(text: string, n: T): T => ({ ...n, note: text });
 export const accent = <T extends Node>(n: T): T => ({ ...n, tone: "accent" }) as T;
 /** 一张卡片（有框）。 */
 export const card = (...children: Node[]): Group => ({ group: children, dir: "col", tone: "card" });

@@ -3,6 +3,7 @@
  * 它展示的是“数据模型 + 行为”，不是页面结构，所以客户看不到入口：只有知道地址（#/_model）的人能进，给 agent 和设计师看结构、试增删改。
  * 真·CRUD：增删改立即生效、状态落 localStorage（见 db.ts）。
  */
+import { notesOf } from "../shared/notes.ts";
 import { isLinkKind } from "../shared/schema.ts";
 import { clampPage, pageCount } from "../shared/order.ts";
 import { ZH } from "../shared/strings.ts";
@@ -21,7 +22,9 @@ const typeTabs = (s: Sketch, current?: string) =>
       ([t, d]) =>
         `<a class="tab${t === current ? " on" : ""}" href="#/_model/${esc(t)}">${esc(d.label)}</a>`,
     )
-    .join("")}<a class="tab" href="#/_model">结构图</a></div>`;
+    .join(
+      "",
+    )}<a class="tab" href="#/_model">结构图</a><a class="tab" href="#/_model/_notes">批注</a></div>`;
 
 const KIND: Record<string, string> = {
   text: "文字",
@@ -73,6 +76,22 @@ export const renderModelView = (s: Sketch, db: Db, parts: string[], qs = ""): Mo
   const crumb = `<div class="crumb"><a href="#/">首页</a> / <a href="#/_model">数据结构</a>${type ? ` / ${esc(s.model[type]?.label ?? type)}` : ""}</div>`;
 
   if (!type) return { title: "数据结构", html: crumb + sec("数据结构", erDiagram(s, db)) };
+
+  if (type === "_notes") {
+    const notes = notesOf(s);
+    return {
+      title: "批注",
+      html:
+        crumb +
+        typeTabs(s) +
+        sec(
+          "批注",
+          notes.length
+            ? `<ul>${notes.map((n) => `<li><code>${esc(n.at)}</code> ${esc(n.note)}</li>`).join("")}</ul>`
+            : "<p>没有批注</p>",
+        ),
+    };
+  }
 
   const def = s.model[type];
   if (!def) return { title: "404", html: "", notFound: true };

@@ -1,6 +1,6 @@
 /**
  * 给 agent 的接口：无状态 MCP（Streamable HTTP，JSON 响应）。工具清单 `TOOLS` 是唯一来源——
- * `scripts/do.ts` 只是它的命令行壳，docs/agent-api.md 与 public/llms.txt 照它写。
+ * `scripts/do.ts` 只是它的命令行壳，docs/agent-api.md 与 docs/llms.txt 照它写。
  *
  * 两个端点：`/mcp` 公开，只有不碰存储的工具（读格式、看范例、体检）；`/admin/mcp` 在 Cloudflare Access 后面，
  * 多出带 [admin] 的发布/下线/换 key 等。协议子集：initialize、notifications/initialized、ping、tools/list、tools/call。

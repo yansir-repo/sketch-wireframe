@@ -41,6 +41,7 @@ Page   = 路由 × 环境 → Node                  环境 = 命名绑定（页�
 - `col(...)` / `row(...)` / `grid(...)`：纵向 / 横向 / 横向折行等分。
 - `section("名字", ...)`：带名字的组 = 一个框，名字是标注。**每个页面的顶层板块都要有名字。**
 - `card(...)` 一张有框的卡片；`pair(名, 值)` 字段表的一行；`accent(node)` 强调色；`ruled(node)` 孩子之间有分隔线。
+- `noted("批注", node)`（组或 each）/ 页面的 `note`：**写给后续开发者的话**（“这块第二期做”“按角色分流”）。不渲染给客户，不算文案（不查占位说明、线条档不管它），运营视图 `#/_model/_notes` 里列出。批注仍在草图 JSON 里，价格、密钥这类红线照扫。**想说明意图用它，不要把话塞进板块名、种子数据或文案里。**
 - `span(份数, node)`：一行里的相对宽度，如 `row(span(1, filters("a")), span(3, collection("t")))`。是份数，不是像素。
 - `when("tab=specs", node)`：条件出现。`"open=q1"` 对多选参数是“包含”，`"a|b"` = 几个参数里任意一个有值，只写参数名 = 有值。
 - `linked(组, {to?, with?, set?})`：让一个组成为链接；选中与否由地址里的参数推出（选项勾上、没得选的变淡）。
@@ -116,7 +117,8 @@ pager(LIST),                      // 同一个 records 来源：页数由它筛�
 | `featureCols({title?, body?, image?}, …)` | `row(col(image?, text(2), text(3)), …)`；`title` / `body` 写 `false` = 没有这一项 |
 | `related(类型, 字段, limit?)` | `collection(类型, {where: {字段: "$字段"}, notSelf: true, limit})`（详情页里的“同类”） |
 | `siteHeader({brand?, nav, actions?})` | `row(brand, nav(...), ...actions)` |
-| `listPage(类型, {title, name?, where?, filters?, search?, sort?, order?, per?, before?, after?})` | 一个**页面**：左栏筛选 + 右边（搜索框、排序菜单、记录卡片、页码），并声明 `sort` / `q` / `page` 三个参数；`where` 同时写进 ctx；`before` / `after` 是前后再加的板块 |
+| `listPage(类型, {title, name?, where?, filters?, search?, sort?, order?, per?, before?, after?})` | 一个**页面**：左栏筛选 + 右边（搜索框、排序菜单、记录卡片、页码），并声明 `sort` / `q` / `page` 三个参数；`where` 同时写进 ctx；`before` / `after` 是前后再加的板块。`sort` 只有一项 = 没有菜单，等同写死的 `order`。**列表页、分类页、标签页都用它，不要手写 `facets` 那一串** |
+| `detailPage(类型, {name?, overview?, sections, related?, after?})` | 一个**页面**：详情页。`overview: {title, heading, sub?, gallery?}` = 图库 + 标题；`sections: [{title, only}]` 每个板块一个 `facts({only})`；`related: [{title, type, by, limit?}]` 每个板块一个 `related()`；`after` 是再加的板块。**字段用 `only` 分给板块，一个字段只出现一次**（见下） |
 | `formPage(类型, {title, name?, before?, after?})` | 一个**页面**：“新增某类型”，板块里放 `form()` |
 
 准入规则：至少两个站点手写了同一个结构才抽成模式；写函数复用自己的结构，永远可以。
@@ -145,14 +147,15 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 |---|---|
 | 有限集合、很多条目共用（分类、认证） | `vocab("名称", [["id","显示名"], …])`；记录里用 `f.term(label, "vocab 类型名", {multiple?})` 存 **id** |
 | 封闭单选 | `f.choice(label, options, {radio?})` |
-| 关系：相关产品、相关案例 | `f.ref(label, "另一个内容类型", {multiple?})`，存对方的主键。详情页用 `facts({only:["related"]})` 显示成链接；集合里用 `where` 查关系（如 `collection("case", {where:{products:"$slug"}})` = 提到当前产品的案例）。引用词表用 `term`，引用内容用 `ref` |
+| 关系：相关产品、相关案例 | `f.ref(label, "另一个内容类型", {multiple?})`，存对方的主键。详情页用 `facts({only:["related"]})` 显示成链接；集合里用 `where` 查关系（如 `collection("case", {where:{products:"$slug"}})` = 提到当前产品的案例）。引用词表用 `term`，引用内容用 `ref`。**关系必须是 `ref`**：用 text / list 存对方的编号（`related_cases`、`product_slug` 列……）`where` 查不到、页面也点不过去，体检直接拦 |
+| 关系上要带属性（角色、数量、状态：套件里的主件/配件，方案用到的产品和作用） | **建一个关联类型**：两个 `ref` + 属性字段，如 `bundle-item {bundle: ref(product), part: ref(product), role: choice}`；页面里 `each(records("bundle-item", {where: {bundle: "$code"}}), row(text(3, bind("it.part")), text(3, bind("it.role"))))`——`it.part` 渲染成指向对方记录的链接。不需要新语法 |
 | 只给后台的字段（审核状态、负责人、核实时间） | `{ internal: true }`：任何客户页面都不能展示它（绑定、facts、筛选、徽章都会被体检拦），公开表单里也没有；后台表格和表单里有 |
 | 可变长、每个记录自己的结构（技术参数） | `f.list(label, {key:"参数名", value:"参数值"}, {kv:true})`，每行带稳定的 `row_id`（不是下标） |
 | 内容本身是一棵树（文章正文） | `f.blocks(label)`：值是一串节点（和页面同一套语法写成数据，不能含 embed / form / nav / brand），详情页用 `embed(bind("body"))` 渲染；后台里是可编辑的大纲（文字、图片、媒体占位、按钮、组/流程可以加删移动、改内容；其余节点用折叠的 JSON 改），保存时校验 |
 | 日期 | `f.date(label)`：ISO（`2026-10-17`），表单里是日期输入，能排序 |
 | 图片 | `f.media(label)`（后台可上传，浏览器里压到长边 ≤800px） |
 | 访客可提交（询盘） | `defType(label, {public:true, …})` → 自动得到公开表单页，提交的记录出现在后台 |
-| 草稿对客户不可见 | `unlisted: {status:"草稿"}` |
+| 草稿对客户不可见 | `unlisted: {status:"草稿"}`：字段得是 choice / text，值得是它真能取到的（不在选项里 = 永远不生效，体检拦）。choice 字段的种子值也必须在选项里 |
 | 列表卡片 | `card: col(image(bind("photos")), text(3, bind("code")))` |
 
 - 类型名和主键值会进路由，只能用 `[A-Za-z0-9._-]`。
@@ -160,7 +163,7 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 
 ## 页面（模型的影子）
 
-每个类型自动得到列表页 `/type`、详情页 `/type/:id`；`public` 类型得到新增表单页；只有被单值 term 字段引用的词表才有“按条目筛选”页。
+每个类型自动得到列表页 `/type`、详情页 `/type/:id`；`public` 类型得到新增表单页；被 term 字段引用的词表（单值、多值都算）有“按条目筛选”页；同一个词表被几个字段引用时单值优先。
 `pages` 里写同名路由 = 覆盖。必须有首页 `/`。
 
 ## 筛选
@@ -183,14 +186,22 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 1. `describe_format`（本文 + JSON Schema）→ 2. `get_example` 看标准答案 → 3. 写草图 → 4. `check_sketch` 直到 `ok` →
 5. `publish_sketch`（需要运营凭证）→ 6. 把返回的 `url` 发给客户；改了再 `publish_sketch` 一次，同一个编号地址不变。
 
-## 体检会提醒的设计问题（不拦发布，但多半该改）
+## 体检：拦发布的，和只提醒的
 
-- **导航 >7 项**：引擎会收进菜单，但这说明信息架构该合并或分组了。
-- **字段从来没出现在任何客户页面上**：要么加进页面，要么标 `internal: true`；没人看的字段不用建。名字像后台流程的字段（审核/核实状态……）出现在客户页上也会提醒。
-- **同一页里两个 `facts` 显示完全相同的字段**：用 `only` 把字段分给不同板块。
-- **详情页里的集合没有 `where`**：显示的是所有记录，不是“相关的”。
-- **占位或解释性文案**（placeholder、for testing、demo only、待填写……）：客户会读到它；没有资料依据的内容留空（波浪线），别写说明。
-- **记录太少（<4）**：列表、筛选、“相关”演示不出来。**字段太多（>25）**：多半是一段段的文字，那是页面里的内容，不是数据结构。**一页顶层板块 >9**。
+`check_sketch` 和发布用同一个判断。**能由数据确定判定的问题是 error，拦发布**：
+
+- **字段从来没出现在任何客户页面上**：要么加进页面，要么标 `internal: true`；没人看的字段不用建。**名字像后台流程的字段**（审核/核实状态……）出现在客户页上也拦——它们标 `internal: true`。
+- **同一页里两个 `facts` / `fields` 显示完全相同的字段**：用 `only` 把字段分给不同板块（别用 `skip`：它是黑名单，类型里新增的字段会自己漏进客户页面）。
+- **详情页里的集合没有 `where`**（显示的是所有记录，不是“相关的”），或者 **`where` 在每条种子记录上都查不到**（演示里永远是空的）。
+- **关系存成了 text / list**（`related_*`、`source_*`、`*_slug` 列）：用 `ref`；要带属性就建关联类型。
+- **`unlisted` 的值取不到、choice 的种子值不在选项里、种子里有没声明的字段**。
+- **占位或解释性文案**（placeholder、Demo、Synthetic、for testing、待填写……）：客户会读到它；没有资料依据的内容留空（波浪线），说明写进 `noted()` 批注。
+
+**本质上靠判断的只是提醒（warning，不拦）**：
+- **导航 >7 项**、**字段 >25**、**一页顶层板块 >9**、**嵌套 >5 层**。
+- **记录太少（<4）**：列表、筛选、“相关”演示不出来——补同形的记录，没有依据的字段留空（标题留空 = 波浪线），**不要写“示意/Demo”之类的说明**。**关联类型**（两个以上 ref，其余只是文字/选项/数字这类属性）不计：一行就是一条关系事实，没有依据的关系不造。
+- 带名字的板块里只放一行没填的文字，是“这里有一段文字”的正当写法，不提醒；想说明意图用 `noted()`，别把意图写成板块名（如 “Intent Branch”——它在表达一个并不存在的结构）。
+- **详情页链到表单页，表单有指回这个类型的 `ref`，链接却没带 `with`**：访客得重填“我问的是哪个”。
 - **英文文案没设 `locale`**。**页眉第一个东西是回首页的 `action`**：logo 用 `brand()`。
 
 ## 词表条目的额外文字
@@ -211,6 +222,5 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 - **页面之外的行为**：支付、搜索引擎、邮件。草图表达结构，这些在网站开发阶段接；
 - **客户直接对记录“做事”**（加购物车、收藏、订阅——不经过表单就创建/修改一条记录）：现在客户能对数据做的只有读和提交一张表。出现需要购物车/收藏的客户时补一个“对记录做事”的动作原语（创建/改字段/删除，带预设值）；
 - **表单的结构**（必填、条件字段、分组、多步向导）：表单是模型推出来的，作者改不了。和上一项一起设计，因为它们同源；
-- **覆盖层**（弹窗、抽屉）与**嵌套导航**（下拉、megamenu）：现在弹窗只能当成普通的 `when` 区块，nav 是平的。出现 nav 超过两层、或客户明确要弹窗流程时补；
-- **给后续开发者的批注**（“这块第二期做”）：需要一个和文案严格分开的 `note` 通道，现在只能写进文案里（而体检不让你写解释性文案）。agent 或客户开始想往草图里写批注时补；
+- **覆盖层**（弹窗、抽屉）与**嵌套导航**（下拉、megamenu）：现在弹窗只能当成普通的 `when` 区块，nav 是平的。出现 nav 超过两层、或客户明确要弹窗流程时补（已有 8 份真实草图里 4 份导航超过 7 项，仍靠“合并或分组”解决，还没到要嵌套的程度）；
 - **模型约束**（唯一、必填、取值范围）、**多语言内容**（同一篇文章的中英两份）、**层级与计算字段**（分类的父子树、总价）。

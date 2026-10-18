@@ -55,8 +55,10 @@ export const pagesOf = (s: Sketch): Record<string, Page & { derived?: boolean }>
   const out: Record<string, Page & { derived?: boolean }> = {};
   for (const [type, def] of Object.entries(s.model)) {
     if (def.vocab) {
-      // 只有“分类型”的词表（被某个单值 term 字段引用，一条记录属于一类）才有自己的页；cert/ident 这种标签型的不推导
-      const ref = referrersOf(s, type).find((r) => !s.model[r.type]!.fields[r.field]!.multiple);
+      // 被 term 字段引用的词表有自己的条目页（单值、多值都一样：where 对数组字段按“包含”匹配）；
+      // 一个词表被几个字段引用时，单值优先（一条记录属于一类），其余按模型顺序
+      const refs = referrersOf(s, type);
+      const ref = refs.find((r) => !s.model[r.type]!.fields[r.field]!.multiple) ?? refs[0];
       if (ref) {
         out[`/${type}`] = {
           name: def.label,
