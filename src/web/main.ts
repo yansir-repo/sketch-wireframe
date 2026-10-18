@@ -3,6 +3,8 @@
  * 这里只负责取回来交给引擎；引擎启动时还会再跑一遍语义校验（纯函数，同一份 validate）。
  */
 import { mount } from "./mount.ts";
+import { mountFeedback } from "./feedback.ts";
+import { feedbackStrings } from "../shared/strings.ts";
 import type { Sketch } from "../shared/schema.ts";
 
 const here = location.pathname.replace(/\/+$/, "");
@@ -15,9 +17,18 @@ if (!/^\/s\/[a-z0-9-]+\.[0-9a-f]{16}$/.test(here)) {
     `${here}/sketch.json${location.search.match(/[?&](v=\d+)/)?.[1] ? `?${location.search.match(/[?&](v=\d+)/)![1]}` : ""}`,
   )
     .then((r) =>
-      r.ok ? (r.json() as Promise<Sketch>) : Promise.reject(new Error(`sketch.json ${r.status}`)),
+      r.ok
+        ? r.json().then((sketch) => ({
+            sketch: sketch as Sketch,
+            // 服务端回答的是哪一版：客户的意见要记在这一版上
+            version: Number(r.headers.get("x-sketch-version")),
+          }))
+        : Promise.reject(new Error(`sketch.json ${r.status}`)),
     )
-    .then((sketch) => mount(sketch))
+    .then(({ sketch, version }) => {
+      mount(sketch);
+      mountFeedback({ base: here, version, L: feedbackStrings(sketch.locale) });
+    })
     .catch((e: unknown) => {
       app.textContent = `草图加载失败：${e instanceof Error ? e.message : String(e)}`;
     });

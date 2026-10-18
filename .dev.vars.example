@@ -1,3 +1,2 @@
-DEV_USER_EMAIL=you@example.com
-CF_ACCESS_CLIENT_ID=
-CF_ACCESS_CLIENT_SECRET=
+# 运营令牌：Authorization: Bearer <ADMIN_TOKEN> 打开 /admin/mcp（脚本 do.ts 也读它）。
+ADMIN_TOKEN=

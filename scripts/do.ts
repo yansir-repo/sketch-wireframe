@@ -10,25 +10,27 @@
  *   node scripts/do.ts publish my.config.ts               # check → publish_sketch (admin): goes live at once
  *   node scripts/do.ts ship my.config.ts [--flow f.mjs]   # check → stage (not live) → verify the preview → promote; a failed verify leaves the live version untouched
  *   node scripts/do.ts audit                              # re-check every published sketch against THIS checkout's schema/validate (deploy runs it)
+ *   node scripts/do.ts feedback EX-CATALOG [--after N]    # what the client wrote: closed rounds + open notes (+ cursor)
+ *   node scripts/do.ts wait-feedback EX-CATALOG [--after N] [--timeout S] [--interval S]   # until a round newer than --after (default: now) is submitted; exit 3 = timed out
  *   node scripts/do.ts list_sketches | get_sketch '{"code":"EX-CATALOG"}' | remove_sketch … | rotate_key … | promote_sketch …
  *
  * A config may `import { … } from "sketch-wireframe"` wherever it lives; this process resolves that name to src/shared/dsl.ts.
  * Output: JSON on stdout; exit 0 ok, 1 failed (tool error, check not ok, verify failed), 2 usage.
- * Base URL: `--url` or $SKETCH_URL, else the deployed one. Admin tools go to `/admin/mcp` behind Cloudflare Access
- * (credential from CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET; see access-client.ts); open tools go to `/mcp`.
+ * Base URL: `--url` or $SKETCH_URL, else the deployed one. Admin tools go to `/admin/mcp` with
+ * `Authorization: Bearer $ADMIN_TOKEN` (environment or .dev.vars; see operator-client.ts); open tools go to `/mcp`.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkSketch } from "../src/shared/check.ts";
-import { accessHeaders } from "./access-client.ts";
+import { operatorHeaders } from "./operator-client.ts";
 
 const DEPLOYED = "https://sketch-wireframe.yansir.workers.dev";
 
 const usage = (why: string): never => {
   console.error(
-    `${why}\nusage: node scripts/do.ts <tools|build|check|publish|ship|audit|<tool>> [file|'<json args>'] [--url U] [--out F] [--flow F]`,
+    `${why}\nusage: node scripts/do.ts <tools|build|check|publish|ship|feedback|wait-feedback|audit|<tool>> [file|'<json args>'] [--url U] [--out F] [--flow F]`,
   );
   process.exit(2);
 };
@@ -79,7 +81,7 @@ const call = (
     headers: {
       "content-type": "application/json",
       accept: "application/json",
-      ...(endpoint === "/admin/mcp" ? accessHeaders(base) : {}),
+      ...(endpoint === "/admin/mcp" ? operatorHeaders() : {}),
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   }).then((r) => r.json() as Promise<RpcReply>);
@@ -213,6 +215,37 @@ switch (command) {
       `已上线 v${live.version}（之前对外的是 ${staged.version ? `v${staged.version}` : "没有"}）`,
     );
     print({ url: live.url, version: live.version });
+    break;
+  }
+  case "feedback": {
+    if (!file) usage("feedback needs a project code");
+    const after = flag("after");
+    print(await tool("list_feedback", { code: file, ...(after ? { after: Number(after) } : {}) }));
+    break;
+  }
+  case "wait-feedback": {
+    if (!file) usage("wait-feedback needs a project code");
+    const timeout = Number(flag("timeout") ?? "3600");
+    const interval = Number(flag("interval") ?? "20");
+    if (!(timeout > 0 && interval > 0)) usage("--timeout and --interval are positive seconds");
+    type Feedback = { rounds: unknown[]; open: unknown[]; cursor: number };
+    // 默认只等“从现在起”新提交的一轮：先记下现在的游标；要读已有的就 --after 0（或 feedback 命令）。
+    const after = flag("after")
+      ? Number(flag("after"))
+      : ((await tool("list_feedback", { code: file })) as Feedback).cursor;
+    const deadline = Date.now() + timeout * 1000;
+    for (;;) {
+      const f = (await tool("list_feedback", { code: file, after })) as Feedback;
+      if (f.rounds.length > 0) {
+        print(f);
+        break;
+      }
+      if (Date.now() >= deadline) {
+        print({ timedOut: true, ...f });
+        process.exit(3);
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+    }
     break;
   }
   case "audit": {

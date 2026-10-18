@@ -78,3 +78,37 @@ export const UI_KEYS: ReadonlyArray<string> = Object.entries(zh)
   .filter(([, v]) => typeof v === "string")
   .map(([k]) => k);
 export const strings = (locale: Sketch["locale"]): Strings => (locale === "en" ? en : zh);
+
+/**
+ * 意见框（`web/feedback.ts`）的文案。它是引擎壳子的一部分，不是草图内容，所以不在 `Strings` 里——
+ * 否则会被当成草图作者能用的 `ui.xxx`。
+ */
+const fbZh = {
+  open: "给这页提意见",
+  close: "关闭",
+  title: (path: string) => `对这一页（${path}）的意见`,
+  placeholder: "这一页哪里不对、缺什么、想怎么改……",
+  send: "发送",
+  sent: "已发送",
+  none: "这一页还没有意见",
+  total: (n: number) => `共 ${n} 条意见（所有页面）`,
+  done: "我提完了",
+  doneOk: "已提交，谢谢。之后再写的意见会算作新的一轮",
+  failed: "没发出去，稍后再试",
+};
+export type FeedbackStrings = typeof fbZh;
+const fbEn: FeedbackStrings = {
+  open: "Comment on this page",
+  close: "Close",
+  title: (path) => `Comments on this page (${path})`,
+  placeholder: "What is wrong, missing, or should change on this page…",
+  send: "Send",
+  sent: "Sent",
+  none: "No comments on this page yet",
+  total: (n) => `${n} comment${n === 1 ? "" : "s"} in total (all pages)`,
+  done: "I'm done",
+  doneOk: "Submitted, thank you. Anything you write later counts as a new round",
+  failed: "Could not send, try again later",
+};
+export const feedbackStrings = (locale: Sketch["locale"]): FeedbackStrings =>
+  locale === "en" ? fbEn : fbZh;

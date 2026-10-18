@@ -178,7 +178,7 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 
 ## 红线（公开预览）
 
-草图地址公开、不过 Access（只靠地址里的随机 key）。**不能放真实价格、账号密码、令牌、合同金额。** `check_sketch` 会拦。
+草图地址公开、没有登录（只靠地址里的随机 key）。**不能放真实价格、账号密码、令牌、合同金额。** `check_sketch` 会拦。
 邮箱、手机号只警告。为演示造出来的“示意数据”也会被客户看到，别让它看起来像真参数，并在配置里注明。
 
 ## 流程

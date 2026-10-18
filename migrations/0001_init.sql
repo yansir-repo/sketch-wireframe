@@ -1,7 +1,7 @@
 -- A published sketch is data: one row per project (the capability key lives here, so the URL can always
 -- be recovered), one row per version (the JSON the engine renders). The engine is deployed once.
 CREATE TABLE sketches (
-  code        TEXT PRIMARY KEY,          -- lowercase slug, e.g. "mz-007"
+  code        TEXT PRIMARY KEY,          -- lowercase slug, e.g. "ex-catalog"
   key         TEXT NOT NULL,             -- 16 hex chars from a CSPRNG: the gate in /s/<code>.<key>
   version     INTEGER NOT NULL,          -- the version currently served
   title       TEXT NOT NULL,

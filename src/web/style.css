@@ -990,3 +990,66 @@ dialog .actions {
 .xbox.media[data-kind="file"] {
   flex: none;
 }
+
+/* 意见框：引擎外面的一层壳，不在 #app 里；类名避开 .bar/.warn/.tools（验证器据此判断客户页没有工具条） */
+.fb[hidden] {
+  display: none;
+}
+.fb-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  box-shadow: 2px 3px 0 var(--line);
+}
+.fb-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 64px;
+  z-index: 50;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 3px 4px 0 var(--line);
+}
+.fb-panel[hidden] {
+  display: none;
+}
+.fb-panel header,
+.fb-panel footer,
+.fb-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.fb-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.fb-none {
+  list-style: none;
+  margin-left: -18px;
+  color: var(--pencil);
+}
+.fb-text {
+  width: 100%;
+  font: inherit;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  background: #fffefb;
+  resize: vertical;
+}
+.fb-status,
+.fb-total {
+  color: var(--pencil);
+  font-size: 14px;
+}

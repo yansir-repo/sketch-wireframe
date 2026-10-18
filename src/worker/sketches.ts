@@ -20,12 +20,29 @@ export const slugOf = (code: string): string => code.trim().toLowerCase();
 
 export const sketchPath = (code: string, key: string): string => `/s/${slugOf(code)}.${key}`;
 
-/** 公开路径：`/s/<slug>.<16 hex>` 与它下面的 `/sketch.json`。 */
+/** 公开路径下面能有的东西：页面本身、草图数据、客户的意见（读 / 写一条 / 提完一轮）。 */
+export type SketchResource =
+  | "page"
+  | "sketch.json"
+  | "feedback.json"
+  | "feedback"
+  | "feedback/done";
+
+/** 公开路径：`/s/<slug>.<16 hex>` 与它下面固定的几条（见 SketchResource）。 */
 export const parseSketchPath = (
   pathname: string,
-): { slug: string; key: string; json: boolean } | null => {
-  const m = /^\/s\/([a-z0-9][a-z0-9-]{1,30})\.([0-9a-f]{16})(\/sketch\.json|\/)?$/.exec(pathname);
-  return m ? { slug: m[1]!, key: m[2]!, json: m[3] === "/sketch.json" } : null;
+): { slug: string; key: string; resource: SketchResource } | null => {
+  const m =
+    /^\/s\/([a-z0-9][a-z0-9-]{1,30})\.([0-9a-f]{16})(\/sketch\.json|\/feedback\.json|\/feedback\/done|\/feedback|\/)?$/.exec(
+      pathname,
+    );
+  if (!m) return null;
+  const tail = m[3];
+  return {
+    slug: m[1]!,
+    key: m[2]!,
+    resource: tail === undefined || tail === "/" ? "page" : (tail.slice(1) as SketchResource),
+  };
 };
 
 const randomKey = Effect.sync(() =>
@@ -49,7 +66,6 @@ export type Meta = {
   readonly version: number;
   readonly path: string;
   readonly updatedAt: number;
-  readonly updatedBy: string;
   readonly deleted: boolean;
   /** 有没有已上线的版本：只暂存过（stage）还没 promote 的草图，version 为 0，公开地址 404。 */
   readonly live: boolean;
@@ -62,7 +78,6 @@ const meta = (r: Readonly<Record<string, unknown>>): Meta => ({
   version: num(r, "version"),
   path: sketchPath(str(r, "code"), str(r, "key")),
   updatedAt: num(r, "updated_at"),
-  updatedBy: str(r, "updated_by"),
   deleted: num(r, "deleted_at") > 0,
   live: num(r, "version") > 0 && !(num(r, "deleted_at") > 0),
 });
@@ -86,7 +101,7 @@ const live = (slug: string) =>
  * `live: true`（默认）= 写完立刻上线；`live: false` = 只暂存：版本存进去，公开地址 `?v=<版本>` 能预览它，
  * 但正在对外的版本不变（新草图则还没有对外的版本）。“验证通过才上线”就是 stage → 验证 → promote。
  */
-export const publish = (input: unknown, actor: string, options: { readonly live?: boolean } = {}) =>
+export const publish = (input: unknown, options: { readonly live?: boolean } = {}) =>
   Effect.gen(function* () {
     const goLive = options.live !== false;
     const report = checkSketch(input);
@@ -107,23 +122,23 @@ export const publish = (input: unknown, actor: string, options: { readonly live?
     const version = sameAsLatest ? num(top, "version") : (top ? num(top, "version") : 0) + 1;
     if (!sameAsLatest)
       yield* db.run(
-        "INSERT INTO sketch_versions (code, version, json, created_at, created_by) VALUES (?, ?, ?, ?, ?)",
-        [slug, version, json, now, actor],
+        "INSERT INTO sketch_versions (code, version, json, created_at) VALUES (?, ?, ?, ?)",
+        [slug, version, json, now],
       );
 
     if (!existing) {
       const key = yield* randomKey;
       yield* db.run(
-        "INSERT INTO sketches (code, key, version, title, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [slug, key, goLive ? version : 0, sketch.title, now, now, actor],
+        "INSERT INTO sketches (code, key, version, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [slug, key, goLive ? version : 0, sketch.title, now, now],
       );
     } else if (goLive) {
       // 上线（含下线后复活）。已经上线且就是这一版 = 没有变化。
       const unchanged = num(existing, "deleted_at") === 0 && num(existing, "version") === version;
       if (!unchanged)
         yield* db.run(
-          "UPDATE sketches SET version = ?, title = ?, updated_at = ?, updated_by = ?, deleted_at = NULL WHERE code = ?",
-          [version, sketch.title, now, actor, slug],
+          "UPDATE sketches SET version = ?, title = ?, updated_at = ?, deleted_at = NULL WHERE code = ?",
+          [version, sketch.title, now, slug],
         );
       const after = yield* row(slug);
       return { ...meta(after!), unchanged, staged: version, warnings: report.warnings };
@@ -166,18 +181,17 @@ export const versions = (code: string) =>
     const current = num(yield* live(slug), "version");
     const db = yield* Db;
     return (yield* db.all(
-      "SELECT version, created_at, created_by FROM sketch_versions WHERE code = ? ORDER BY version DESC",
+      "SELECT version, created_at FROM sketch_versions WHERE code = ? ORDER BY version DESC",
       [slug],
     )).map((r) => ({
       version: num(r, "version"),
       live: num(r, "version") === current,
       createdAt: num(r, "created_at"),
-      createdBy: str(r, "created_by"),
     }));
   });
 
 /** 让某个版本成为对外的版本——上线一个暂存的版本，或者退回旧版本，是同一个动作；地址不变。 */
-export const promote = (code: string, version: number, actor: string) =>
+export const promote = (code: string, version: number) =>
   Effect.gen(function* () {
     const slug = slugOf(code);
     yield* live(slug);
@@ -188,57 +202,54 @@ export const promote = (code: string, version: number, actor: string) =>
     ]);
     if (!v) return yield* new SketchNotFound({ what: `${slug} v${version}` });
     const now = yield* nowSeconds;
-    yield* db.run(
-      "UPDATE sketches SET version = ?, updated_at = ?, updated_by = ? WHERE code = ?",
-      [version, now, actor, slug],
-    );
+    yield* db.run("UPDATE sketches SET version = ?, updated_at = ? WHERE code = ?", [
+      version,
+      now,
+      slug,
+    ]);
     return meta((yield* row(slug))!);
   });
 
 /** 下线：地址立刻失效，历史保留；再发布同一个编号会复活原来的地址。 */
-export const remove = (code: string, actor: string) =>
+export const remove = (code: string) =>
   Effect.gen(function* () {
     const slug = slugOf(code);
     yield* live(slug);
     const db = yield* Db;
     const now = yield* nowSeconds;
-    yield* db.run(
-      "UPDATE sketches SET deleted_at = ?, updated_at = ?, updated_by = ? WHERE code = ?",
-      [now, now, actor, slug],
-    );
+    yield* db.run("UPDATE sketches SET deleted_at = ?, updated_at = ? WHERE code = ?", [
+      now,
+      now,
+      slug,
+    ]);
     return { code: slug, removed: true };
   });
 
 /** 换 key：旧链接立刻失效（泄露了，或不想让之前发出去的人继续看）。 */
-export const rotateKey = (code: string, actor: string) =>
+export const rotateKey = (code: string) =>
   Effect.gen(function* () {
     const slug = slugOf(code);
     yield* live(slug);
     const db = yield* Db;
     const key = yield* randomKey;
     const now = yield* nowSeconds;
-    yield* db.run("UPDATE sketches SET key = ?, updated_at = ?, updated_by = ? WHERE code = ?", [
-      key,
-      now,
-      actor,
-      slug,
-    ]);
+    yield* db.run("UPDATE sketches SET key = ?, updated_at = ? WHERE code = ?", [key, now, slug]);
     return meta((yield* row(slug))!);
   });
 
 /**
  * 公开读：code + key 都对才给；对错同一种结果（null）。不带 version = 正在对外的版本（还没上线 = null）；
- * 带 version = 预览那一版（暂存的也行）——闸门仍是同一个 key。
+ * 带 version = 预览那一版（暂存的也行）——闸门仍是同一个 key。答案带着它实际是哪一版：客户的意见要记在这一版上。
  */
 export const serve = (slug: string, key: string, version?: number) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const r = yield* db.first(
-      "SELECT s.key AS key, s.deleted_at AS deleted_at, v.json AS json FROM sketches s JOIN sketch_versions v ON v.code = s.code AND v.version = COALESCE(?, s.version) WHERE s.code = ?",
+      "SELECT s.key AS key, s.deleted_at AS deleted_at, v.version AS version, v.json AS json FROM sketches s JOIN sketch_versions v ON v.code = s.code AND v.version = COALESCE(?, s.version) WHERE s.code = ?",
       [version ?? null, slug],
     );
     if (!r || num(r, "deleted_at") > 0 || !sameKey(str(r, "key"), key)) return null;
-    return str(r, "json");
+    return { json: str(r, "json"), version: num(r, "version") };
   });
 
 /** 首页上唯一出现的草图：范例（虚构的）。库里没有或没上线 = null。 */

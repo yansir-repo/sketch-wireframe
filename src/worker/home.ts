@@ -4,9 +4,25 @@
  * 唯一出现的草图是范例（虚构的），它的地址在渲染时从库里取，不写死在文件里。
  */
 
-/** 填占位符：{{origin}}；{{example}} 所在的整行——没有可用的范例就整行去掉。 */
-export const fillTemplate = (template: string, origin: string, exampleUrl: string | null): string =>
+const names = (tools: ReadonlyArray<{ readonly name: string }>): string =>
+  tools.map((t) => `\`${t.name}\``).join(", ");
+
+/**
+ * 填占位符：{{origin}}；{{openTools}} / {{adminTools}}（工具名，从 `TOOLS` 生成，不手写第二份）；
+ * {{example}} 所在的整行——没有可用的范例就整行去掉。
+ */
+export const fillTemplate = (
+  template: string,
+  origin: string,
+  exampleUrl: string | null,
+  tools: {
+    readonly open: ReadonlyArray<{ readonly name: string }>;
+    readonly admin: ReadonlyArray<{ readonly name: string }>;
+  },
+): string =>
   template
+    .replace("{{openTools}}", names(tools.open))
+    .replace("{{adminTools}}", names(tools.admin))
     .split("\n")
     .flatMap((line) => {
       if (!line.includes("{{example}}")) return [line];
