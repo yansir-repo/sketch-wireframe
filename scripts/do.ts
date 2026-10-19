@@ -17,7 +17,7 @@
  * A config may `import { … } from "sketch-wireframe"` wherever it lives; this process resolves that name to src/shared/dsl.ts.
  * Output: JSON on stdout; exit 0 ok, 1 failed (tool error, check not ok, verify failed), 2 usage.
  * Base URL: `--url` or $SKETCH_URL, else the deployed one. Admin tools go to `/admin/mcp` with
- * `Authorization: Bearer $ADMIN_TOKEN` (environment or .dev.vars; see operator-client.ts); open tools go to `/mcp`.
+ * `Authorization: Bearer $ADMIN_TOKEN` (environment, ./.dev.vars or this repo's .dev.vars; see operator-client.ts); open tools go to `/mcp`.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";

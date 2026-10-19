@@ -58,7 +58,7 @@ node scripts/do.ts list_sketches | get_sketch '{"code":"EX-CATALOG"}' | remove_s
 - 配置里写 `import { … } from "sketch-wireframe"`，不管配置放在哪个仓库、工具仓库在哪个目录：命令行把这个名字解析到本仓库的 `src/shared/dsl.ts`。
 - 输出：工具结果的 JSON 在 stdout；退出码 0 成功、1 失败（工具报错 / 体检不过 / 验证不过）、2 用法错误。
 - 地址：`--url` 或 `$SKETCH_URL`，默认线上；本机调试用 `--url http://localhost:5173`。
-- 凭证：`$ADMIN_TOKEN`，其次本仓库的 `.dev.vars`。本机 localhost 也要（同一个令牌）。
+- 凭证：`$ADMIN_TOKEN`，其次**当前目录**的 `.dev.vars`（在客户项目仓库里跑时用那个仓库的），再其次本仓库的 `.dev.vars`。本机 localhost 也要（同一个令牌）。
 
 ## 3. 验证
 
