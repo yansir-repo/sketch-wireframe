@@ -197,6 +197,9 @@ importers:
       roughjs:
         specifier: 4.6.6
         version: 4.6.6
+      vite:
+        specifier: 'catalog:'
+        version: '@voidzero-dev/vite-plus-core@0.3.1(@types/node@22.15.17)(typescript@7.0.2)'
       wired-checkbox:
         specifier: 2.1.0
         version: 2.1.0
@@ -246,9 +249,6 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
-      vite:
-        specifier: 'catalog:'
-        version: '@voidzero-dev/vite-plus-core@0.3.1(@types/node@22.15.17)(typescript@7.0.2)'
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.1(@types/node@22.15.17)(typescript@7.0.2)
