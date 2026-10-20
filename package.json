@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/effect/install-compiler.mjs && node scripts/hooks-install.mjs",
-    "vite": "vite"
+    "vite": "vp"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",
