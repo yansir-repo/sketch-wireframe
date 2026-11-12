@@ -323,6 +323,13 @@ export type Row = Record<string, unknown>;
 const RowSchema = Schema.Record(Schema.String, Schema.Unknown);
 
 export const TypeDef = Schema.Struct({
+  /** Disable automatically derived visitor routes; explicit pages still take precedence. */
+  routes: Schema.optionalKey(
+    Schema.Struct({
+      list: Schema.optionalKey(Schema.Boolean),
+      detail: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
   label: Schema.String,
   /** 主键字段名；"id" 且字段里没声明 = 自动生成。 */
   key: Schema.String,

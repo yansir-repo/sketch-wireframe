@@ -100,6 +100,10 @@ export const pagesOf = (s: Sketch): Record<string, Page & { derived?: boolean }>
       };
     }
   }
+  for (const [type, def] of Object.entries(s.model)) {
+    if (def.routes?.list === false) delete out[`/${type}`];
+    if (def.routes?.detail === false) delete out[`/${type}/:id`];
+  }
   for (const [pattern, page] of Object.entries(s.pages)) out[pattern] = page; // 同名路由 = 覆盖
   return out;
 };
