@@ -166,6 +166,12 @@ TypeDef = { label, key, fields, seed, vocab?, public?, title?, unlisted?, card? 
 每个类型自动得到列表页 `/type`、详情页 `/type/:id`；`public` 类型得到新增表单页；被 term 字段引用的词表（单值、多值都算）有“按条目筛选”页；同一个词表被几个字段引用时单值优先。
 `pages` 里写同名路由 = 覆盖。必须有首页 `/`。
 
+类型可设置 `routes: { list: false, detail: false }`，分别关闭自动派生的 `/type` 和 `/type/:id`；省略或写 `true` 均保持原行为。只关闭详情可写 `routes: { detail: false }`。这个开关只影响自动页面，显式 `pages` 仍然优先，也不删除后台记录或改变 `ref`/`term` 关系。没有详情页时，默认卡片与引用不会再自动链接到详情。
+
+开关按路由生效，不区分页面种类：`public` 类型的 `/type` 是新增表单页，`list: false` 会关掉它（访客就没有提交入口，除非在 `pages` 里另写）；它本来没有 `/type/:id`，写 `detail: false` 不起作用。词表的 `/type` 和 `/type/:id` 是条目列表和“按条目筛选”页，关掉后，指向它们的显式链接会被 `check_sketch` 拦下。
+
+例如文件记录可以保留后台及产品关联，关闭自动页面，在自定义资料中心直接呈现同一文件资产。辅助关联模型也可以关闭自动页面；原来只在默认详情显示的字段，要在所属业务页展示，或确属后台用途时标 `internal: true`，仍须通过同一个 `check_sketch`。本可选字段向后兼容，格式版本不变。
+
 ## 筛选
 
 `filters("category", "materials")`：同一字段内多选取并集、不同字段取交集；选项旁的数字 = “在其余条件都满足时，再选它还剩几个”，剩 0 个变淡；

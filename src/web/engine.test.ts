@@ -887,3 +887,26 @@ describe("note: for the next developer, never for the client", () => {
     expect(node(withNote, rc)).not.toContain("secret note");
   });
 });
+
+describe("disabled automatic detail links", () => {
+  it("renders cards and refs as content while retaining backend records", () => {
+    const s: Sketch = {
+      ...example,
+      model: {
+        ...example.model,
+        product: { ...example.model.product!, routes: { detail: false } },
+      },
+      pages: Object.fromEntries(
+        Object.entries(example.pages).filter(([path]) => path !== "/product/:id"),
+      ),
+    };
+    const list = node(collection("product"), rcOf(s, { listType: "product" }));
+    expect(list).not.toContain('href="#/product/');
+    expect(list).toContain('class="card"');
+    const row = { ...s.model.product!.seed[0]!, related: ["P102"] };
+    const reference = node(text(3, bind("related")), rcOf(s, { page: { type: "product", row } }));
+    expect(reference).not.toContain('href="#/product/');
+    expect(reference).toContain("data-copy");
+    expect(rcOf(s).db.find("product", "P102")).toBeDefined();
+  });
+});

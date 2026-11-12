@@ -1,3 +1,4 @@
+import process from "node:process";
 import { bindings, defineConfig } from "cf/config";
 
 /**
@@ -31,7 +32,7 @@ export default defineConfig((ctx) => ({
       ADMIN_TOKEN: bindings.secret(),
       PUBLIC_URL: bindings.text(
         ctx.mode === "development"
-          ? "http://localhost:5173"
+          ? (process.env["SKETCH_LOCAL_URL"] ?? "http://localhost:5173")
           : "https://sketch-wireframe.yansir.workers.dev",
       ),
     },

@@ -19,7 +19,7 @@
  * Base URL: `--url` or $SKETCH_URL, else the deployed one. Admin tools go to `/admin/mcp` with
  * `Authorization: Bearer $ADMIN_TOKEN` (environment, ./.dev.vars or this repo's .dev.vars; see operator-client.ts); open tools go to `/mcp`.
  */
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -123,16 +123,21 @@ const printReport = (r: ReturnType<typeof checkSketch>) => {
 };
 
 /** 本机 Chrome 验证（可带项目流程脚本）。url 可以是预览地址（?v=）。 */
-const verify = (url: string): number =>
-  spawnSync(
-    "node",
-    [
-      new URL("./verify.ts", import.meta.url).pathname,
-      url,
-      ...(flag("flow") ? ["--flow", flag("flow")!] : []),
-    ],
-    { stdio: "inherit" },
-  ).status ?? 1;
+const verify = (url: string): Promise<number> =>
+  new Promise((resolve) => {
+    // Keep the event loop alive during Chrome checks so idle RPC sockets can close normally.
+    const child = spawn(
+      "node",
+      [
+        new URL("./verify.ts", import.meta.url).pathname,
+        url,
+        ...(flag("flow") ? ["--flow", flag("flow")!] : []),
+      ],
+      { stdio: "inherit" },
+    );
+    child.once("error", () => resolve(1));
+    child.once("exit", (code) => resolve(code ?? 1));
+  });
 
 switch (command) {
   case "tools": {
@@ -203,7 +208,7 @@ switch (command) {
       console.error(remote.message);
       process.exit(1);
     }
-    if (localNeeded && verify(staged.previewUrl) !== 0) {
+    if (localNeeded && (await verify(staged.previewUrl)) !== 0) {
       console.error("本机验证没通过，没有上线。");
       process.exit(1);
     }
